@@ -138,6 +138,7 @@ model User {
   trips            Trip[]
   bookings         Booking[]
   auditLogs        AuditLog[]
+  tripRequests TripRequest[]
 
   @@index([email])
 }
