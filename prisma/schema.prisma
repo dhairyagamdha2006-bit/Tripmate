@@ -1,0 +1,506 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum CabinClass {
+  ECONOMY
+  PREMIUM_ECONOMY
+  BUSINESS
+  FIRST
+}
+
+enum SeatPreference {
+  WINDOW
+  AISLE
+  MIDDLE
+  NO_PREFERENCE
+}
+
+enum SmokingPreference {
+  NON_SMOKING
+  SMOKING
+  NO_PREFERENCE
+}
+
+enum BedType {
+  KING
+  QUEEN
+  TWIN
+  DOUBLE
+  NO_PREFERENCE
+}
+
+enum TripRequestStatus {
+  DRAFT
+  SEARCHING
+  RECOMMENDATIONS_READY
+  PACKAGE_SELECTED
+  PENDING_APPROVAL
+  BOOKING_PENDING
+  CONFIRMED
+  FAILED
+  CANCELLED
+  COMPLETED
+}
+
+enum SearchSessionKind {
+  FLIGHTS
+  HOTELS
+}
+
+enum SearchSessionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+enum PackageLabel {
+  BEST_VALUE
+  CHEAPEST
+  MOST_CONVENIENT
+  PREMIUM
+  MOST_FLEXIBLE
+}
+
+enum BookingStatus {
+  PENDING_APPROVAL
+  PENDING_PROVIDER_CONFIRMATION
+  CONFIRMED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum BookingItemType {
+  FLIGHT
+  HOTEL
+}
+
+enum BookingItemStatus {
+  PENDING
+  HELD
+  CONFIRMED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum AgentMessageRole {
+  ASSISTANT
+  USER
+  SYSTEM
+  TOOL
+}
+
+enum AgentMessageType {
+  TEXT
+  QUESTION
+  STATUS
+  SUMMARY
+  TOOL_CALL
+  TOOL_RESULT
+  ERROR
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  ASSISTANT
+  ADMIN
+}
+
+model User {
+  id               String           @id @default(cuid())
+  email            String           @unique
+  passwordHash     String?
+  firstName        String
+  lastName         String
+  role             Role             @default(USER)
+  emailVerifiedAt  DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  sessions         Session[]
+  travelerProfile  TravelerProfile?
+  paymentMethods   PaymentMethod[]
+  trips            Trip[]
+  bookings         Booking[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model TravelerProfile {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  fullLegalName        String
+  dateOfBirth          DateTime           @db.Date
+  nationality          String
+  passportNumber       String
+  passportExpiry       DateTime           @db.Date
+  homeAirportCode      String             @db.Char(3)
+  preferredCabinClass  CabinClass         @default(ECONOMY)
+  seatPreference       SeatPreference     @default(NO_PREFERENCE)
+  preferDirectFlights  Boolean            @default(false)
+  preferredHotelChains String[]           @default([])
+  bedType              BedType?
+  smokingPreference    SmokingPreference  @default(NON_SMOKING)
+  accessibilityNeeds   String[]           @default([])
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loyaltyPrograms      LoyaltyProgram[]
+  preferenceSnapshots  TripPreferenceSnapshot[]
+}
+
+model LoyaltyProgram {
+  id         String          @id @default(cuid())
+  profileId  String
+  program    String
+  memberId   String
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  profile    TravelerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model PaymentMethod {
+  id                       String   @id @default(cuid())
+  userId                   String
+  provider                 String
+  providerCustomerId       String?
+  providerPaymentMethodId  String
+  brand                    String?
+  last4                    String?
+  expiryMonth              Int?
+  expiryYear               Int?
+  isDefault                Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings                 Booking[]
+
+  @@index([userId])
+}
+
+model Trip {
+  id                String            @id @default(cuid())
+  userId            String
+  title             String
+  originLabel       String
+  destinationLabel  String
+  departureDate     DateTime          @db.Date
+  returnDate        DateTime          @db.Date
+  travelerCount     Int               @default(1)
+  status            TripRequestStatus @default(DRAFT)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requests          TripRequest[]
+  bookings          Booking[]
+  auditLogs         AuditLog[]
+
+  @@index([userId, status])
+  @@index([departureDate])
+}
+
+model TripRequest {
+  id                     String                @id @default(cuid())
+  tripId                 String
+  userId                 String
+  originCode             String                @db.Char(3)
+  originCity             String
+  destinationCode        String                @db.Char(3)
+  destinationCity        String
+  departureDate          DateTime              @db.Date
+  returnDate             DateTime              @db.Date
+  travelerCount          Int                   @default(1)
+  budgetCents            Int
+  currency               String                @default("USD") @db.Char(3)
+  cabinClass             CabinClass            @default(ECONOMY)
+  preferDirectFlights    Boolean               @default(false)
+  hotelStarLevel         Int                   @default(3)
+  neighborhoodPreference String?
+  amenities              String[]              @default([])
+  refundableOnly         Boolean               @default(false)
+  notes                  String?
+  selectedPackageId      String?
+  status                 TripRequestStatus     @default(DRAFT)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  trip                   Trip                  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user                   User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferenceSnapshot     TripPreferenceSnapshot?
+  flightOptions          FlightOptionCache[]
+  hotelOptions           HotelOptionCache[]
+  packages               TripPackage[]
+  bookings               Booking[]
+  searchSessions         ProviderSearchSession[]
+  agentMessages          AgentMessage[]
+
+  @@index([tripId, createdAt])
+  @@index([userId, status])
+}
+
+model TripPreferenceSnapshot {
+  id                   String            @id @default(cuid())
+  tripRequestId        String            @unique
+  travelerProfileId    String?
+  homeAirportCode      String?           @db.Char(3)
+  preferredCabinClass  CabinClass?
+  preferDirectFlights  Boolean?
+  seatPreference       SeatPreference?
+  preferredHotelChains String[]          @default([])
+  bedType              BedType?
+  smokingPreference    SmokingPreference?
+  accessibilityNeeds   String[]          @default([])
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  tripRequest          TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  travelerProfile      TravelerProfile?  @relation(fields: [travelerProfileId], references: [id], onDelete: SetNull)
+}
+
+model ProviderSearchSession {
+  id              String               @id @default(cuid())
+  tripRequestId   String
+  kind            SearchSessionKind
+  provider        String
+  status          SearchSessionStatus  @default(PENDING)
+  requestPayload  Json?
+  responsePayload Json?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  tripRequest     TripRequest          @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  flightOptions   FlightOptionCache[]
+  hotelOptions    HotelOptionCache[]
+
+  @@index([tripRequestId, kind, status])
+  @@index([provider])
+}
+
+model FlightOptionCache {
+  id                      String                 @id @default(cuid())
+  tripRequestId           String
+  providerSearchSessionId String?
+  provider                String
+  providerOfferId         String
+  airline                 String
+  airlineCode             String                 @db.Char(2)
+  flightNumber            String
+  originCode              String                 @db.Char(3)
+  destinationCode         String                 @db.Char(3)
+  departureTime           DateTime
+  arrivalTime             DateTime
+  durationMinutes         Int
+  stops                   Int                    @default(0)
+  stopDetails             String[]               @default([])
+  cabinClass              CabinClass
+  priceCents              Int
+  currency                String                 @default("USD") @db.Char(3)
+  refundable              Boolean                @default(false)
+  changeable              Boolean                @default(false)
+  baggageIncluded         Boolean                @default(false)
+  seatsAvailable          Int?
+  loyaltyProgram          String?
+  returnFlightNumber      String?
+  returnDepartureTime     DateTime?
+  returnArrivalTime       DateTime?
+  returnDurationMinutes   Int?
+  returnStops             Int?
+  cachedAt                DateTime               @default(now())
+  expiresAt               DateTime?
+
+  tripRequest             TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  providerSearchSession   ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
+  packages                TripPackage[]
+
+  @@index([tripRequestId, priceCents])
+  @@index([provider, providerOfferId])
+}
+
+model HotelOptionCache {
+  id                      String                 @id @default(cuid())
+  tripRequestId           String
+  providerSearchSessionId String?
+  provider                String
+  providerHotelId         String
+  providerOfferId         String
+  name                    String
+  chain                   String?
+  stars                   Int
+  neighborhood            String?
+  city                    String
+  countryCode             String                 @db.Char(2)
+  address                 String
+  latitude                Float?
+  longitude               Float?
+  pricePerNightCents      Int
+  totalPriceCents         Int
+  nights                  Int
+  currency                String                 @default("USD") @db.Char(3)
+  rating                  Float?
+  reviewCount             Int?
+  amenities               String[]               @default([])
+  refundable              Boolean                @default(false)
+  cancellationDeadline    DateTime?
+  roomType                String?
+  bedType                 BedType?
+  distanceToCenterKm      Float?
+  cachedAt                DateTime               @default(now())
+  expiresAt               DateTime?
+
+  tripRequest             TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  providerSearchSession   ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
+  packages                TripPackage[]
+
+  @@index([tripRequestId, totalPriceCents])
+  @@index([provider, providerHotelId])
+}
+
+model TripPackage {
+  id                     String        @id @default(cuid())
+  tripRequestId          String
+  flightOptionCacheId    String
+  hotelOptionCacheId     String
+  label                  PackageLabel
+  recommended            Boolean       @default(false)
+  overallScore           Int
+  priceFitScore          Int
+  convenienceScore       Int
+  travelDurationScore    Int
+  hotelQualityScore      Int
+  refundFlexibilityScore Int
+  preferenceMatchScore   Int
+  explanation            String
+  highlights             String[]      @default([])
+  warnings               String[]      @default([])
+  totalPriceCents        Int
+  currency               String        @default("USD") @db.Char(3)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  tripRequest            TripRequest   @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  flightOption           FlightOptionCache @relation(fields: [flightOptionCacheId], references: [id], onDelete: Cascade)
+  hotelOption            HotelOptionCache  @relation(fields: [hotelOptionCacheId], references: [id], onDelete: Cascade)
+  booking                Booking?
+
+  @@index([tripRequestId, overallScore])
+}
+
+model Booking {
+  id                String         @id @default(cuid())
+  userId            String
+  tripId            String
+  tripRequestId     String         @unique
+  tripPackageId     String         @unique
+  paymentMethodId   String?
+  status            BookingStatus  @default(PENDING_APPROVAL)
+  confirmationNumber String?       @unique
+  totalPriceCents   Int
+  currency          String         @default("USD") @db.Char(3)
+  cancellationDeadline DateTime?
+  bookedAt          DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip              Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripRequest       TripRequest    @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  tripPackage       TripPackage    @relation(fields: [tripPackageId], references: [id], onDelete: Cascade)
+  paymentMethod     PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  items             BookingItem[]
+  auditLogs         AuditLog[]
+
+  @@index([userId, status])
+  @@index([tripId])
+}
+
+model BookingItem {
+  id                String            @id @default(cuid())
+  bookingId         String
+  type              BookingItemType
+  status            BookingItemStatus @default(PENDING)
+  provider          String
+  providerReference String?
+  displayName       String
+  amountCents       Int
+  currency          String            @default("USD") @db.Char(3)
+  details           Json?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  booking           Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, type])
+}
+
+model AgentMessage {
+  id            String            @id @default(cuid())
+  tripRequestId String
+  role          AgentMessageRole
+  type          AgentMessageType
+  content       String
+  metadata      Json?
+  createdAt     DateTime          @default(now())
+
+  tripRequest   TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+
+  @@index([tripRequestId, createdAt])
+}
+
+model AuditLog {
+  id         String         @id @default(cuid())
+  userId     String?
+  tripId     String?
+  bookingId  String?
+  actorType  AuditActorType
+  action     String
+  details    Json?
+  createdAt  DateTime       @default(now())
+
+  user       User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  trip       Trip?          @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  booking    Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([tripId])
+  @@index([bookingId])
+  @@index([action])
+}
