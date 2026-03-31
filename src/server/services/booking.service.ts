@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { bookingRepository } from '@/server/repositories/booking.repository';
 import { tripRepository } from '@/server/repositories/trip.repository';
 import { userRepository } from '@/server/repositories/user.repository';
@@ -102,7 +103,7 @@ export const bookingService = {
         displayName: item.type === 'FLIGHT' ? `${pkg.flightOption.airline} · ${pkg.flightOption.flightNumber}` : `${pkg.hotelOption.name} · ${pkg.hotelOption.nights} nights`,
         amountCents: item.type === 'FLIGHT' ? flightAmount : hotelAmount,
         currency: pkg.currency,
-        details: item.details
+        details: item.details ? (item.details as Prisma.InputJsonValue) : undefined,
       }))
     });
 
