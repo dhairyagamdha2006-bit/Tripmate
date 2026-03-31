@@ -19,6 +19,13 @@ export function jsonError(error: string, status = 400, fieldErrors?: Record<stri
   return NextResponse.json(fail(error, fieldErrors), { status });
 }
 
-export function fieldErrorsFromZod(error: ZodError) {
-  return error.flatten().fieldErrors;
+export function fieldErrorsFromZod(error: ZodError): Record<string, string[]> {
+  const flattened = error.flatten().fieldErrors;
+
+  return Object.fromEntries(
+    Object.entries(flattened).filter(
+      (entry): entry is [string, string[]] =>
+        Array.isArray(entry[1]) && entry[1].length > 0
+    )
+  );
 }
