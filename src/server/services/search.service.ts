@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { MockFlightProvider } from '@/server/integrations/mock-flight-provider';
 import { MockHotelProvider } from '@/server/integrations/mock-hotel-provider';
 import { recommendationService } from '@/server/services/recommendation.service';
@@ -72,8 +73,17 @@ export const searchService = {
       })
     ]);
 
-    await searchSessionRepository.updateStatus(flightSession.id, 'COMPLETED', flightOffers as unknown as Record<string, unknown>);
-    await searchSessionRepository.updateStatus(hotelSession.id, 'COMPLETED', hotelOffers as unknown as Record<string, unknown>);
+    await searchSessionRepository.updateStatus(
+  flightSession.id,
+  'COMPLETED',
+  flightOffers as unknown as Prisma.InputJsonValue
+);
+
+await searchSessionRepository.updateStatus(
+  hotelSession.id,
+  'COMPLETED',
+  hotelOffers as unknown as Prisma.InputJsonValue
+);
 
     const flightOptionRows = flightOffers.map((offer) => ({
       tripRequestId: request.id,
