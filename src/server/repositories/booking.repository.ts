@@ -10,6 +10,14 @@ export const bookingRepository = {
     });
   },
 
+  updateBookingStatus(bookingId: string, status: BookingStatus) {
+  return prisma.booking.update({
+    where: { id: bookingId },
+     { status, updatedAt: new Date() }
+  });
+},
+
+
   getBookingByRequestId(tripRequestId: string) {
     return prisma.booking.findUnique({
       where: { tripRequestId },
