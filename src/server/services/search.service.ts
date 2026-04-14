@@ -1,6 +1,9 @@
 import { Prisma } from '@prisma/client';
-import { MockFlightProvider } from '@/server/integrations/mock-flight-provider';
-import { MockHotelProvider } from '@/server/integrations/mock-hotel-provider';
+import { createFlightProvider, createHotelProvider } from '@/server/integrations/provider-factory';
+
+const flightProvider = createFlightProvider();
+const hotelProvider = createHotelProvider();
+
 import { recommendationService } from '@/server/services/recommendation.service';
 import { searchSessionRepository } from '@/server/repositories/search-session.repository';
 import { tripRepository } from '@/server/repositories/trip.repository';
