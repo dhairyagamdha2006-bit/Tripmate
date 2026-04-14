@@ -280,3 +280,16 @@ export type TravelerProfileFormData = {
   accessibilityNeeds: string[];
   loyaltyPrograms: { program: string; memberId: string }[];
 };
+
+export type NotificationPayload = {
+  toEmail: string;
+  toName: string;
+  subject: string;
+  templateData?: {
+    message?: string;
+    details?: Record<string, string>;
+    ctaUrl?: string;
+    ctaLabel?: string;
+    [key: string]: unknown;
+  };
+};
