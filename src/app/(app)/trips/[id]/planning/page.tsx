@@ -29,7 +29,7 @@ export default async function PlanningPage({ params }: { params: { id: string } 
       </div>
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <PlanningRunner tripId={trip.id} status={trip.status} />
-        <AIChatPanel messages={detail.agentMessages} />
+        <AIChatPanel messages={detail.agentMessages} tripId={trip.id} />
       </div>
     </ResponsiveShell>
   );
