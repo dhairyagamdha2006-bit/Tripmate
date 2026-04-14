@@ -93,6 +93,14 @@ export const tripRepository = {
     });
   },
 
+  getAgentMessages(tripRequestId: string) {
+  return prisma.agentMessage.findMany({
+    where: { tripRequestId },
+    orderBy: { createdAt: 'asc' },
+    take: 50
+  });
+},
+
   getTripByIdForUser(userId: string, tripId: string) {
     return prisma.trip.findFirst({
       where: { id: tripId, userId },
