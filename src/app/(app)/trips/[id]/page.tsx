@@ -44,7 +44,7 @@ export default async function TripDetailPage({ params }: { params: { id: string 
               action={<LinkButton href={`/trips/${trip.id}/planning`}>Go to planning</LinkButton>}
             />
           )}
-          <AIChatPanel messages={detail.agentMessages} />
+          <AIChatPanel messages={detail.agentMessages} tripId={trip.id} />
         </div>
         <div className="space-y-5">
           {detail.booking ? <BookingSummaryCard booking={detail.booking} /> : null}
