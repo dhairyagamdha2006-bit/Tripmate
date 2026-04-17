@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Suspense } from 'react';
 import { LoginForm } from '@/components/forms/login-form';
 
 export default function LoginPage() {
@@ -9,7 +10,9 @@ export default function LoginPage() {
         <h1 className="font-serif text-4xl text-slate-900">Sign in to Tripmate</h1>
         <p className="mt-3 text-sm text-slate-500">Review your trips, saved traveler profile, and booking details.</p>
         <div className="mt-8">
-          <LoginForm />
+          <Suspense fallback={<div className="h-40" />}>
+            <LoginForm />
+          </Suspense>
         </div>
         <p className="mt-6 text-sm text-slate-500">
           Need an account?{' '}

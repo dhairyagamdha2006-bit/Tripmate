@@ -7,6 +7,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
 enum Role {
   USER
   ADMIN
@@ -46,8 +50,10 @@ enum TripRequestStatus {
   RECOMMENDATIONS_READY
   PACKAGE_SELECTED
   PENDING_APPROVAL
+  PAYMENT_AUTHORIZED
   BOOKING_PENDING
   CONFIRMED
+  PENDING_FULFILLMENT
   FAILED
   CANCELLED
   COMPLETED
@@ -76,7 +82,9 @@ enum PackageLabel {
 
 enum BookingStatus {
   PENDING_APPROVAL
+  PAYMENT_AUTHORIZED
   PENDING_PROVIDER_CONFIRMATION
+  PENDING_FULFILLMENT
   CONFIRMED
   FAILED
   CANCELLED
@@ -92,6 +100,7 @@ enum BookingItemStatus {
   PENDING
   HELD
   CONFIRMED
+  PENDING_FULFILLMENT
   FAILED
   CANCELLED
   REFUNDED
@@ -121,223 +130,291 @@ enum AuditActorType {
   ADMIN
 }
 
-model User {
-  id               String           @id @default(cuid())
-  email            String           @unique
-  passwordHash     String?
-  firstName        String
-  lastName         String
-  role             Role             @default(USER)
-  emailVerifiedAt  DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+enum ReminderKind {
+  CANCELLATION_DEADLINE
+  TRIP_DEPARTURE
+}
 
-  sessions         Session[]
-  travelerProfile  TravelerProfile?
-  paymentMethods   PaymentMethod[]
-  trips            Trip[]
-  bookings         Booking[]
-  auditLogs        AuditLog[]
-  tripRequests TripRequest[]
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users + Auth.js
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   DateTime?
+  // passwordHash uses bcrypt for new accounts. Legacy `salt:scrypt` hashes
+  // are migrated to bcrypt on the next successful login.
+  passwordHash    String?
+  firstName       String
+  lastName        String
+  name            String?
+  image           String?
+  role            Role      @default(USER)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  travelerProfile TravelerProfile?
+  paymentMethods  PaymentMethod[]
+  trips           Trip[]
+  bookings        Booking[]
+  auditLogs       AuditLog[]
+  tripRequests    TripRequest[]
 
   @@index([email])
 }
 
-model Session {
-  id         String   @id @default(cuid())
-  userId     String
-  token      String   @unique
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+// Auth.js Account (OAuth provider links)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Retained for compatibility with the legacy custom session flow during
+// migration. Auth.js itself uses JWT sessions, so this table is not written
+// to by Auth.js but is kept for the one-shot logout sweep and historical
+// records. Safe to drop in a future migration after launch.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([expiresAt])
 }
 
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Traveler profile
+// ─────────────────────────────────────────────────────────────────────────────
+
 model TravelerProfile {
-  id                   String             @id @default(cuid())
-  userId               String             @unique
+  id                   String            @id @default(cuid())
+  userId               String            @unique
   fullLegalName        String
-  dateOfBirth          DateTime           @db.Date
+  dateOfBirth          DateTime          @db.Date
   nationality          String
   passportNumber       String
-  passportExpiry       DateTime           @db.Date
-  homeAirportCode      String             @db.Char(3)
-  preferredCabinClass  CabinClass         @default(ECONOMY)
-  seatPreference       SeatPreference     @default(NO_PREFERENCE)
-  preferDirectFlights  Boolean            @default(false)
-  preferredHotelChains String[]           @default([])
+  passportExpiry       DateTime          @db.Date
+  homeAirportCode      String            @db.Char(3)
+  preferredCabinClass  CabinClass        @default(ECONOMY)
+  seatPreference       SeatPreference    @default(NO_PREFERENCE)
+  preferDirectFlights  Boolean           @default(false)
+  preferredHotelChains String[]          @default([])
   bedType              BedType?
-  smokingPreference    SmokingPreference  @default(NON_SMOKING)
-  accessibilityNeeds   String[]           @default([])
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  smokingPreference    SmokingPreference @default(NON_SMOKING)
+  accessibilityNeeds   String[]          @default([])
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
-  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  loyaltyPrograms      LoyaltyProgram[]
-  preferenceSnapshots  TripPreferenceSnapshot[]
+  user                User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loyaltyPrograms     LoyaltyProgram[]
+  preferenceSnapshots TripPreferenceSnapshot[]
 }
 
 model LoyaltyProgram {
-  id         String          @id @default(cuid())
-  profileId  String
-  program    String
-  memberId   String
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  id        String   @id @default(cuid())
+  profileId String
+  program   String
+  memberId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  profile    TravelerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profile TravelerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
   @@index([profileId])
 }
 
-model PaymentMethod {
-  id                       String   @id @default(cuid())
-  userId                   String
-  provider                 String
-  providerCustomerId       String?
-  providerPaymentMethodId  String
-  brand                    String?
-  last4                    String?
-  expiryMonth              Int?
-  expiryYear               Int?
-  isDefault                Boolean  @default(false)
-  createdAt                DateTime @default(now())
-  updatedAt                DateTime @updatedAt
+// ─────────────────────────────────────────────────────────────────────────────
+// Payments
+// ─────────────────────────────────────────────────────────────────────────────
 
-  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bookings                 Booking[]
+model PaymentMethod {
+  id                      String   @id @default(cuid())
+  userId                  String
+  provider                String
+  providerCustomerId      String?
+  providerPaymentMethodId String
+  brand                   String?
+  last4                   String?
+  expiryMonth             Int?
+  expiryYear              Int?
+  isDefault               Boolean  @default(false)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings Booking[]
 
   @@index([userId])
 }
 
-model Trip {
-  id                String            @id @default(cuid())
-  userId            String
-  title             String
-  originLabel       String
-  destinationLabel  String
-  departureDate     DateTime          @db.Date
-  returnDate        DateTime          @db.Date
-  travelerCount     Int               @default(1)
-  status            TripRequestStatus @default(DRAFT)
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+// ─────────────────────────────────────────────────────────────────────────────
+// Trips and requests
+// ─────────────────────────────────────────────────────────────────────────────
 
-  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  requests          TripRequest[]
-  bookings          Booking[]
-  auditLogs         AuditLog[]
+model Trip {
+  id               String            @id @default(cuid())
+  userId           String
+  title            String
+  originLabel      String
+  destinationLabel String
+  departureDate    DateTime          @db.Date
+  returnDate       DateTime          @db.Date
+  travelerCount    Int               @default(1)
+  status           TripRequestStatus @default(DRAFT)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requests  TripRequest[]
+  bookings  Booking[]
+  shares    ItineraryShare[]
+  auditLogs AuditLog[]
 
   @@index([userId, status])
   @@index([departureDate])
 }
 
 model TripRequest {
-  id                     String                @id @default(cuid())
+  id                     String            @id @default(cuid())
   tripId                 String
   userId                 String
-  originCode             String                @db.Char(3)
+  originCode             String            @db.Char(3)
   originCity             String
-  destinationCode        String                @db.Char(3)
+  destinationCode        String            @db.Char(3)
   destinationCity        String
-  departureDate          DateTime              @db.Date
-  returnDate             DateTime              @db.Date
-  travelerCount          Int                   @default(1)
+  departureDate          DateTime          @db.Date
+  returnDate             DateTime          @db.Date
+  travelerCount          Int               @default(1)
   budgetCents            Int
-  currency               String                @default("USD") @db.Char(3)
-  cabinClass             CabinClass            @default(ECONOMY)
-  preferDirectFlights    Boolean               @default(false)
-  hotelStarLevel         Int                   @default(3)
+  currency               String            @default("USD") @db.Char(3)
+  cabinClass             CabinClass        @default(ECONOMY)
+  preferDirectFlights    Boolean           @default(false)
+  hotelStarLevel         Int               @default(3)
   neighborhoodPreference String?
-  amenities              String[]              @default([])
-  refundableOnly         Boolean               @default(false)
+  amenities              String[]          @default([])
+  refundableOnly         Boolean           @default(false)
   notes                  String?
   selectedPackageId      String?
-  status                 TripRequestStatus     @default(DRAFT)
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
+  status                 TripRequestStatus @default(DRAFT)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
 
-  trip                   Trip                  @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  user                   User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
-  preferenceSnapshot     TripPreferenceSnapshot?
-  flightOptions          FlightOptionCache[]
-  hotelOptions           HotelOptionCache[]
-  packages               TripPackage[]
-  bookings               Booking[]
-  searchSessions         ProviderSearchSession[]
-  agentMessages          AgentMessage[]
+  trip               Trip                    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferenceSnapshot TripPreferenceSnapshot?
+  flightOptions      FlightOptionCache[]
+  hotelOptions       HotelOptionCache[]
+  packages           TripPackage[]
+  bookings           Booking[]
+  searchSessions     ProviderSearchSession[]
+  agentMessages      AgentMessage[]
 
   @@index([tripId, createdAt])
   @@index([userId, status])
 }
 
 model TripPreferenceSnapshot {
-  id                   String            @id @default(cuid())
-  tripRequestId        String            @unique
+  id                   String             @id @default(cuid())
+  tripRequestId        String             @unique
   travelerProfileId    String?
-  homeAirportCode      String?           @db.Char(3)
+  homeAirportCode      String?            @db.Char(3)
   preferredCabinClass  CabinClass?
   preferDirectFlights  Boolean?
   seatPreference       SeatPreference?
-  preferredHotelChains String[]          @default([])
+  preferredHotelChains String[]           @default([])
   bedType              BedType?
   smokingPreference    SmokingPreference?
-  accessibilityNeeds   String[]          @default([])
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  accessibilityNeeds   String[]           @default([])
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
-  tripRequest          TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  travelerProfile      TravelerProfile?  @relation(fields: [travelerProfileId], references: [id], onDelete: SetNull)
+  tripRequest     TripRequest      @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  travelerProfile TravelerProfile? @relation(fields: [travelerProfileId], references: [id], onDelete: SetNull)
 }
 
 model ProviderSearchSession {
-  id              String               @id @default(cuid())
+  id              String              @id @default(cuid())
   tripRequestId   String
   kind            SearchSessionKind
   provider        String
-  status          SearchSessionStatus  @default(PENDING)
+  status          SearchSessionStatus @default(PENDING)
   requestPayload  Json?
   responsePayload Json?
   startedAt       DateTime?
   completedAt     DateTime?
   expiresAt       DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
-  tripRequest     TripRequest          @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  flightOptions   FlightOptionCache[]
-  hotelOptions    HotelOptionCache[]
+  tripRequest   TripRequest         @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  flightOptions FlightOptionCache[]
+  hotelOptions  HotelOptionCache[]
 
   @@index([tripRequestId, kind, status])
   @@index([provider])
 }
 
 model FlightOptionCache {
-  id                      String                 @id @default(cuid())
+  id                      String     @id @default(cuid())
   tripRequestId           String
   providerSearchSessionId String?
   provider                String
   providerOfferId         String
   airline                 String
-  airlineCode             String                 @db.Char(2)
+  airlineCode             String     @db.Char(2)
   flightNumber            String
-  originCode              String                 @db.Char(3)
-  destinationCode         String                 @db.Char(3)
+  originCode              String     @db.Char(3)
+  destinationCode         String     @db.Char(3)
   departureTime           DateTime
   arrivalTime             DateTime
   durationMinutes         Int
-  stops                   Int                    @default(0)
-  stopDetails             String[]               @default([])
+  stops                   Int        @default(0)
+  stopDetails             String[]   @default([])
   cabinClass              CabinClass
   priceCents              Int
-  currency                String                 @default("USD") @db.Char(3)
-  refundable              Boolean                @default(false)
-  changeable              Boolean                @default(false)
-  baggageIncluded         Boolean                @default(false)
+  currency                String     @default("USD") @db.Char(3)
+  refundable              Boolean    @default(false)
+  changeable              Boolean    @default(false)
+  baggageIncluded         Boolean    @default(false)
   seatsAvailable          Int?
   loyaltyProgram          String?
   returnFlightNumber      String?
@@ -345,19 +422,19 @@ model FlightOptionCache {
   returnArrivalTime       DateTime?
   returnDurationMinutes   Int?
   returnStops             Int?
-  cachedAt                DateTime               @default(now())
+  cachedAt                DateTime   @default(now())
   expiresAt               DateTime?
 
-  tripRequest             TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  providerSearchSession   ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
-  packages                TripPackage[]
+  tripRequest           TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  providerSearchSession ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
+  packages              TripPackage[]
 
   @@index([tripRequestId, priceCents])
   @@index([provider, providerOfferId])
 }
 
 model HotelOptionCache {
-  id                      String                 @id @default(cuid())
+  id                      String    @id @default(cuid())
   tripRequestId           String
   providerSearchSessionId String?
   provider                String
@@ -368,40 +445,40 @@ model HotelOptionCache {
   stars                   Int
   neighborhood            String?
   city                    String
-  countryCode             String                 @db.Char(2)
+  countryCode             String    @db.Char(2)
   address                 String
   latitude                Float?
   longitude               Float?
   pricePerNightCents      Int
   totalPriceCents         Int
   nights                  Int
-  currency                String                 @default("USD") @db.Char(3)
+  currency                String    @default("USD") @db.Char(3)
   rating                  Float?
   reviewCount             Int?
-  amenities               String[]               @default([])
-  refundable              Boolean                @default(false)
+  amenities               String[]  @default([])
+  refundable              Boolean   @default(false)
   cancellationDeadline    DateTime?
   roomType                String?
   bedType                 BedType?
   distanceToCenterKm      Float?
-  cachedAt                DateTime               @default(now())
+  cachedAt                DateTime  @default(now())
   expiresAt               DateTime?
 
-  tripRequest             TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  providerSearchSession   ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
-  packages                TripPackage[]
+  tripRequest           TripRequest            @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  providerSearchSession ProviderSearchSession? @relation(fields: [providerSearchSessionId], references: [id], onDelete: SetNull)
+  packages              TripPackage[]
 
   @@index([tripRequestId, totalPriceCents])
   @@index([provider, providerHotelId])
 }
 
 model TripPackage {
-  id                     String        @id @default(cuid())
+  id                     String       @id @default(cuid())
   tripRequestId          String
   flightOptionCacheId    String
   hotelOptionCacheId     String
   label                  PackageLabel
-  recommended            Boolean       @default(false)
+  recommended            Boolean      @default(false)
   overallScore           Int
   priceFitScore          Int
   convenienceScore       Int
@@ -410,47 +487,66 @@ model TripPackage {
   refundFlexibilityScore Int
   preferenceMatchScore   Int
   explanation            String
-  highlights             String[]      @default([])
-  warnings               String[]      @default([])
+  highlights             String[]     @default([])
+  warnings               String[]     @default([])
   totalPriceCents        Int
-  currency               String        @default("USD") @db.Char(3)
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  currency               String       @default("USD") @db.Char(3)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
 
-  tripRequest            TripRequest   @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  flightOption           FlightOptionCache @relation(fields: [flightOptionCacheId], references: [id], onDelete: Cascade)
-  hotelOption            HotelOptionCache  @relation(fields: [hotelOptionCacheId], references: [id], onDelete: Cascade)
-  booking                Booking?
+  tripRequest  TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  flightOption FlightOptionCache @relation(fields: [flightOptionCacheId], references: [id], onDelete: Cascade)
+  hotelOption  HotelOptionCache  @relation(fields: [hotelOptionCacheId], references: [id], onDelete: Cascade)
+  booking      Booking?
 
   @@index([tripRequestId, overallScore])
 }
 
-model Booking {
-  id                String         @id @default(cuid())
-  userId            String
-  tripId            String
-  tripRequestId     String         @unique
-  tripPackageId     String         @unique
-  paymentMethodId   String?
-  status            BookingStatus  @default(PENDING_APPROVAL)
-  confirmationNumber String?       @unique
-  totalPriceCents   Int
-  currency          String         @default("USD") @db.Char(3)
-  cancellationDeadline DateTime?
-  bookedAt          DateTime?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+// ─────────────────────────────────────────────────────────────────────────────
+// Bookings + payments + reminders + sharing
+// ─────────────────────────────────────────────────────────────────────────────
 
-  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  trip              Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  tripRequest       TripRequest    @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
-  tripPackage       TripPackage    @relation(fields: [tripPackageId], references: [id], onDelete: Cascade)
-  paymentMethod     PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
-  items             BookingItem[]
-  auditLogs         AuditLog[]
+model Booking {
+  id                   String        @id @default(cuid())
+  userId               String
+  tripId               String
+  tripRequestId        String        @unique
+  tripPackageId        String        @unique
+  paymentMethodId      String?
+  status               BookingStatus @default(PENDING_APPROVAL)
+  confirmationNumber   String?       @unique
+  totalPriceCents      Int
+  currency             String        @default("USD") @db.Char(3)
+  cancellationDeadline DateTime?
+  bookedAt             DateTime?
+
+  // Stripe payment tracking. We keep both the intent ID (for charge tracking)
+  // and a denormalised status string for simple checks.
+  paymentIntentId     String?   @unique
+  paymentStatus       String?
+  paymentAuthorizedAt DateTime?
+  paymentCapturedAt   DateTime?
+
+  // Whether the booking actually resulted in a real provider confirmation
+  // (e.g. a Stripe charge succeeded and an Amadeus PNR was issued) versus
+  // being held in `PENDING_FULFILLMENT` for manual operator follow-up.
+  fulfillmentMode String? // 'auto' | 'manual'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip          Trip              @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  tripRequest   TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  tripPackage   TripPackage       @relation(fields: [tripPackageId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod?    @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  items         BookingItem[]
+  reminders     BookingReminder[]
+  auditLogs     AuditLog[]
 
   @@index([userId, status])
   @@index([tripId])
+  @@index([cancellationDeadline])
 }
 
 model BookingItem {
@@ -467,38 +563,82 @@ model BookingItem {
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
-  booking           Booking           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   @@index([bookingId, type])
 }
 
+model BookingReminder {
+  id            String         @id @default(cuid())
+  bookingId     String
+  kind          ReminderKind
+  // Number of hours before the deadline that this reminder should fire at.
+  // Combined with bookingId in a unique constraint to make dispatch
+  // strictly idempotent — the cron will never double-send.
+  offsetHours   Int
+  scheduledFor  DateTime
+  status        ReminderStatus @default(PENDING)
+  sentAt        DateTime?
+  failureReason String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId, kind, offsetHours])
+  @@index([status, scheduledFor])
+}
+
+model ItineraryShare {
+  id           String    @id @default(cuid())
+  tripId       String
+  // High-entropy URL-safe token. Embedded in the share URL.
+  token        String    @unique
+  createdById  String
+  createdAt    DateTime  @default(now())
+  expiresAt    DateTime?
+  revokedAt    DateTime?
+  viewCount    Int       @default(0)
+  lastViewedAt DateTime?
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([token])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI conversation + audit
+// ─────────────────────────────────────────────────────────────────────────────
+
 model AgentMessage {
-  id            String            @id @default(cuid())
+  id            String           @id @default(cuid())
   tripRequestId String
   role          AgentMessageRole
   type          AgentMessageType
   content       String
+  // Provider, model, latency, token counts, etc.
   metadata      Json?
-  createdAt     DateTime          @default(now())
+  createdAt     DateTime         @default(now())
 
-  tripRequest   TripRequest       @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
+  tripRequest TripRequest @relation(fields: [tripRequestId], references: [id], onDelete: Cascade)
 
   @@index([tripRequestId, createdAt])
 }
 
 model AuditLog {
-  id         String         @id @default(cuid())
-  userId     String?
-  tripId     String?
-  bookingId  String?
-  actorType  AuditActorType
-  action     String
-  details    Json?
-  createdAt  DateTime       @default(now())
+  id        String         @id @default(cuid())
+  userId    String?
+  tripId    String?
+  bookingId String?
+  actorType AuditActorType
+  action    String
+  details   Json?
+  createdAt DateTime       @default(now())
 
-  user       User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  trip       Trip?          @relation(fields: [tripId], references: [id], onDelete: SetNull)
-  booking    Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  trip    Trip?    @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@index([tripId])

@@ -1,12 +1,10 @@
 import { PrismaClient, CabinClass, SeatPreference, SmokingPreference, BedType, TripRequestStatus, BookingStatus, BookingItemStatus, BookingItemType, PackageLabel, AgentMessageRole, AgentMessageType, AuditActorType } from '@prisma/client';
-import { randomBytes, scryptSync } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
 function hashPassword(password: string) {
-  const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, 12);
 }
 
 function addDays(days: number) {

@@ -1,6 +1,7 @@
 import { PageHeader } from '@/components/common/page-header';
 import { ResponsiveShell } from '@/components/common/responsive-shell';
 import { ProfileForm } from '@/components/forms/profile-form';
+import { AddPaymentMethodForm } from '@/components/forms/add-payment-method-form';
 import { requireCurrentUser } from '@/lib/auth/session';
 import { profileService } from '@/server/services/profile.service';
 import type { TravelerProfileFormData } from '@/types/travel';
@@ -37,6 +38,9 @@ export default async function ProfilePage() {
         description="Tripmate uses this profile to reduce booking errors, respect your preferences, and prepare better bundles."
       />
       <ProfileForm initialData={initialData} />
+      <div className="mt-8">
+        <AddPaymentMethodForm />
+      </div>
     </ResponsiveShell>
   );
 }

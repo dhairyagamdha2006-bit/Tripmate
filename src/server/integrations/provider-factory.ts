@@ -1,7 +1,14 @@
 /**
- * Provider Factory
- * Reads env vars and returns the correct provider.
- * Every service imports from here — never instantiates providers directly.
+ * Provider factory.
+ *
+ * Reads env vars and returns the most appropriate implementation for
+ * each boundary. Every service imports from here — no service should
+ * instantiate a provider directly.
+ *
+ * Honesty rule: the *mock* providers are legitimate fallbacks for
+ * local dev and preview deployments. The booking service treats any
+ * provider whose name starts with `mock-` as "quote only" and marks
+ * the resulting booking PENDING_FULFILLMENT rather than CONFIRMED.
  */
 import type {
   FlightSearchProvider,
@@ -19,7 +26,7 @@ import { MockHotelProvider } from './mock-hotel-provider';
 import { MockBookingProvider } from './mock-booking-provider';
 import { StripePaymentProvider } from './stripe-provider';
 import { MockPaymentProvider } from './mock-payment-provider';
-import { SendGridNotificationProvider } from './sendgrid-provider';
+import { ResendNotificationProvider } from './resend-provider';
 import { MockNotificationProvider } from './mock-notification-provider';
 
 export function createFlightProvider(): FlightSearchProvider {
@@ -40,6 +47,8 @@ export function createHotelProvider(): HotelSearchProvider {
 }
 
 export function createBookingProvider(): BookingProvider {
+  // We do not yet have a real booking provider wired up. Amadeus test
+  // tier is search-only. Swap this when we have production credentials.
   return new MockBookingProvider();
 }
 
@@ -51,8 +60,8 @@ export function createPaymentProvider(): PaymentProvider {
 }
 
 export function createNotificationProvider(): NotificationProvider {
-  if (process.env.SENDGRID_API_KEY) {
-    return new SendGridNotificationProvider();
+  if (process.env.RESEND_API_KEY) {
+    return new ResendNotificationProvider();
   }
   return new MockNotificationProvider();
 }
