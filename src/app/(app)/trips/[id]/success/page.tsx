@@ -3,6 +3,7 @@ import { ConfirmationCard } from '@/components/booking/confirmation-card';
 import { PageHeader } from '@/components/common/page-header';
 import { ResponsiveShell } from '@/components/common/responsive-shell';
 import { LinkButton } from '@/components/ui/link-button';
+import { ShareItineraryButton } from '@/components/trip/share-itinerary-button';
 import { requireCurrentUser } from '@/lib/auth/session';
 import { tripService } from '@/server/services/trip.service';
 import { mapTripDetail } from '@/server/mappers/trip.mapper';
@@ -29,18 +30,26 @@ export default async function BookingSuccessPage({
     ? formatDate(selected.hotel.cancellationDeadline)
     : null;
 
+  const pendingFulfilment = detail.booking.status === 'PENDING_FULFILLMENT';
+  const headline = pendingFulfilment
+    ? 'Payment authorised · finalising with suppliers'
+    : 'Your trip is confirmed';
+  const subline = pendingFulfilment
+    ? "We've authorised your card and are issuing the reservation. You'll get a confirmation email once everything is finalised."
+    : 'A confirmation email has been sent to your inbox.';
+
   return (
     <ResponsiveShell className="py-10">
       {/* Success header */}
-      <div className="mb-8 rounded-2xl border border-teal-200 bg-teal-50 p-6 text-center">
-        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-teal-100">
-          <svg className="h-7 w-7 text-teal-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+      <div className={`mb-8 rounded-2xl border p-6 text-center ${pendingFulfilment ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'}`}>
+        <div className={`mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full ${pendingFulfilment ? 'bg-amber-100' : 'bg-teal-100'}`}>
+          <svg className={`h-7 w-7 ${pendingFulfilment ? 'text-amber-700' : 'text-teal-700'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={pendingFulfilment ? 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' : 'M5 13l4 4L19 7'} />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-teal-900">Your trip is confirmed!</h1>
-        <p className="mt-1.5 text-sm text-teal-700">
-          A confirmation email has been sent to your inbox.
+        <h1 className={`text-2xl font-bold ${pendingFulfilment ? 'text-amber-900' : 'text-teal-900'}`}>{headline}</h1>
+        <p className={`mt-1.5 text-sm ${pendingFulfilment ? 'text-amber-700' : 'text-teal-700'}`}>
+          {subline}
         </p>
       </div>
 
@@ -74,7 +83,7 @@ export default async function BookingSuccessPage({
       {/* What's included */}
       {selected && (
         <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="mb-3 text-base font-semibold text-slate-900">What's included</h2>
+          <h2 className="mb-3 text-base font-semibold text-slate-900">What&apos;s included</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Flight</p>
@@ -111,6 +120,10 @@ export default async function BookingSuccessPage({
         {!isRefundable && (
           <p className="mt-1 text-xs">At least one component of this package is non-refundable.</p>
         )}
+      </div>
+
+      <div className="mb-6">
+        <ShareItineraryButton tripId={trip.id} />
       </div>
 
       <div className="flex flex-wrap gap-3">

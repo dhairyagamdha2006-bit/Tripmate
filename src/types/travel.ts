@@ -142,13 +142,9 @@ export type PaymentAuthorizationInput = {
 export type PaymentAuthorizationResult = {
   success: boolean;
   providerReference?: string;
+  /** Raw provider status (e.g. Stripe intent status) when available. */
+  status?: string;
   failureReason?: string;
-};
-
-export type NotificationPayload = {
-  to: string;
-  subject: string;
-  body: string;
 };
 
 export type FlightView = {

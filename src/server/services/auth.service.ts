@@ -1,58 +1,51 @@
 import { userRepository } from '@/server/repositories/user.repository';
-import { hashPassword, verifyPassword } from '@/lib/auth/password';
-import { createSessionForUser } from '@/lib/auth/session';
+import { hashPassword } from '@/lib/auth/password';
 import { createNotificationProvider } from '@/server/integrations/provider-factory';
-import type { LoginInput, SignupInput } from '@/lib/validations/auth';
+import type { SignupInput } from '@/lib/validations/auth';
 
+/**
+ * Signup service.
+ *
+ * Login is handled by Auth.js — see `src/auth.ts`. This service exists
+ * only to create the underlying user record, hash the password with
+ * bcrypt, and fire the welcome email. The caller is expected to
+ * subsequently call `signIn('credentials', ...)` from the client so
+ * Auth.js can issue its session cookie.
+ */
 export const authService = {
   async signup(input: SignupInput) {
-    const existing = await userRepository.findByEmail(input.email);
+    const email = input.email.trim().toLowerCase();
+    const existing = await userRepository.findByEmail(email);
     if (existing) {
-      // Don't reveal that the email exists — just silently succeed
-      // We create a fake session-like delay to prevent timing attacks
-      await new Promise((r) => setTimeout(r, 200));
+      // Generic message — never reveal whether the email is taken.
       throw new Error('Unable to create account. Please try again.');
     }
 
+    const passwordHash = await hashPassword(input.password);
+
     const user = await userRepository.createUser({
-      email: input.email.toLowerCase(),
+      email,
       firstName: input.firstName.trim(),
       lastName: input.lastName.trim(),
-      passwordHash: hashPassword(input.password)
+      name: `${input.firstName.trim()} ${input.lastName.trim()}`,
+      passwordHash
     });
 
-    const session = await createSessionForUser(user.id);
-
-    // Send welcome email (non-blocking — failure doesn't break signup)
+    // Fire-and-forget welcome email — never blocks account creation.
     const notificationProvider = createNotificationProvider();
-    notificationProvider.send({
-      toEmail: user.email,
-      toName: `${user.firstName} ${user.lastName}`,
-      subject: 'Welcome to Tripmate ✈️',
-      templateData: {
-        message: `Hi ${user.firstName}, welcome to Tripmate! You're all set to start planning your next trip.`,
-        ctaUrl: `${process.env.APP_URL}/trips/new`,
-        ctaLabel: 'Plan your first trip'
-      }
-    }).catch((err) => console.error('[auth] Welcome email failed:', err));
+    notificationProvider
+      .send({
+        toEmail: user.email,
+        toName: `${user.firstName} ${user.lastName}`,
+        subject: 'Welcome to Tripmate',
+        templateData: {
+          message: `Hi ${user.firstName}, welcome to Tripmate. You're all set to start planning your next trip.`,
+          ctaUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? ''}/trips/new`,
+          ctaLabel: 'Plan your first trip'
+        }
+      })
+      .catch((err) => console.error('[auth] Welcome email failed:', err));
 
-    return { user, session };
-  },
-
-  async login(input: LoginInput) {
-    const user = await userRepository.findByEmail(input.email);
-
-    // Always run verifyPassword even if user not found — prevents timing attacks
-    const dummyHash = 'a:b';
-    const valid = user?.passwordHash
-      ? verifyPassword(input.password, user.passwordHash)
-      : verifyPassword(input.password, dummyHash);
-
-    if (!user || !valid) {
-      throw new Error('Invalid email or password.');
-    }
-
-    const session = await createSessionForUser(user.id);
-    return { user, session };
+    return { user };
   }
 };

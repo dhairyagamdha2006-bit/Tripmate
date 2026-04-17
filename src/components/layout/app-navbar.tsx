@@ -1,19 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { signOut } from 'next-auth/react';
 import { Plane, UserCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils/cn';
 
 export function AppNavbar({ userName }: { userName: string }) {
   const pathname = usePathname();
-  const router = useRouter();
 
-  async function signOut() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
-    router.refresh();
+  async function handleSignOut() {
+    await signOut({ callbackUrl: '/login' });
   }
 
   const links = [
@@ -56,7 +54,7 @@ export function AppNavbar({ userName }: { userName: string }) {
             <UserCircle2 className="h-4 w-4" />
             {userName}
           </div>
-          <Button variant="secondary" size="sm" onClick={signOut}>
+          <Button variant="secondary" size="sm" onClick={handleSignOut}>
             Sign out
           </Button>
         </div>

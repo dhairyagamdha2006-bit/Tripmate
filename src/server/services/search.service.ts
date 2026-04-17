@@ -1,15 +1,11 @@
 import { Prisma } from '@prisma/client';
 import { createFlightProvider, createHotelProvider } from '@/server/integrations/provider-factory';
-
-const flightProvider = createFlightProvider();
-const hotelProvider = createHotelProvider();
-
 import { recommendationService } from '@/server/services/recommendation.service';
 import { searchSessionRepository } from '@/server/repositories/search-session.repository';
 import { tripRepository } from '@/server/repositories/trip.repository';
 
-const flightProvider = new MockFlightProvider();
-const hotelProvider = new MockHotelProvider();
+const flightProvider = createFlightProvider();
+const hotelProvider = createHotelProvider();
 
 export const searchService = {
   async runSearch(userId: string, tripId: string) {

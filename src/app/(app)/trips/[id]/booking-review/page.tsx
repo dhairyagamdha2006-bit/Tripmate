@@ -70,7 +70,7 @@ export default async function BookingReviewPage({ params }: { params: { id: stri
           </Card>
         </div>
         <div className="space-y-5 xl:sticky xl:top-24 xl:self-start">
-          <TrustBanner message="Tripmate never books without your explicit approval. Payment is mocked in this starter project." />
+          <TrustBanner message="Tripmate never books without your explicit approval. Your card is authorized (not charged) until a provider confirms availability. If provider fulfilment is unavailable, your hold is released and Tripmate marks the trip as pending fulfilment with no confirmation number." />
           <Card>
             <CardContent className="space-y-5 p-5">
               <div>

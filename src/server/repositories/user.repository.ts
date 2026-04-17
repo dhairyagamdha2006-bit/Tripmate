@@ -14,21 +14,6 @@ export const userRepository = {
     return prisma.user.create({ data });
   },
 
-  createSession(data: Prisma.SessionUncheckedCreateInput) {
-    return prisma.session.create({ data });
-  },
-
-  findSessionByToken(token: string) {
-    return prisma.session.findUnique({
-      where: { token },
-      include: { user: true }
-    });
-  },
-
-  deleteSessionByToken(token: string) {
-    return prisma.session.deleteMany({ where: { token } });
-  },
-
   getDefaultPaymentMethod(userId: string) {
     return prisma.paymentMethod.findFirst({
       where: { userId },
@@ -36,21 +21,16 @@ export const userRepository = {
     });
   },
 
-  async ensureMockPaymentMethod(userId: string) {
-    const existing = await prisma.paymentMethod.findFirst({ where: { userId } });
-    if (existing) return existing;
+  getPaymentMethodForUser(userId: string, paymentMethodId: string) {
+    return prisma.paymentMethod.findFirst({
+      where: { id: paymentMethodId, userId }
+    });
+  },
 
-    return prisma.paymentMethod.create({
-      data: {
-        userId,
-        provider: 'mock-stripe',
-        providerPaymentMethodId: `pm_${userId.slice(-12)}`,
-        brand: process.env.MOCK_PAYMENT_DEFAULT_BRAND ?? 'Visa',
-        last4: process.env.MOCK_PAYMENT_DEFAULT_LAST4 ?? '4242',
-        expiryMonth: 12,
-        expiryYear: new Date().getFullYear() + 5,
-        isDefault: true
-      }
+  listPaymentMethods(userId: string) {
+    return prisma.paymentMethod.findMany({
+      where: { userId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }]
     });
   }
 };
