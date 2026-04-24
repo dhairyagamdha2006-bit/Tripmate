@@ -1,36 +1,16 @@
-import type {
-  BookingProviderResult,
-  BookingRequestPayload,
-  FlightSearchInput,
-  HotelSearchInput,
-  NormalizedFlightOffer,
-  NormalizedHotelOffer,
-  NotificationPayload,
-  PaymentAuthorizationInput,
-  PaymentAuthorizationResult
-} from '@/types/travel';
+import { NotificationPayload, FlightSearchInput, HotelSearchInput, NormalizedFlightOffer, NormalizedHotelOffer } from '@/types/travel';
 
-export interface FlightSearchProvider {
-  name: string;
-  searchFlights(input: FlightSearchInput): Promise<NormalizedFlightOffer[]>;
+export interface FlightProvider {
+  readonly name: string;
+  search(input: FlightSearchInput): Promise<NormalizedFlightOffer[]>;
 }
 
-export interface HotelSearchProvider {
-  name: string;
-  searchHotels(input: HotelSearchInput): Promise<NormalizedHotelOffer[]>;
+export interface HotelProvider {
+  readonly name: string;
+  search(input: HotelSearchInput): Promise<NormalizedHotelOffer[]>;
 }
 
-export interface BookingProvider {
-  name: string;
-  createBooking(input: BookingRequestPayload): Promise<BookingProviderResult>;
-}
-
-export interface PaymentProvider {
-  name: string;
-  authorize(input: PaymentAuthorizationInput): Promise<PaymentAuthorizationResult>;
-}
-
-export interface NotificationProvider {
-  name: string;
-  send(input: NotificationPayload): Promise<void>;
+export interface EmailProvider {
+  readonly name: string;
+  send(input: NotificationPayload): Promise<{ providerMessageId?: string }>;
 }

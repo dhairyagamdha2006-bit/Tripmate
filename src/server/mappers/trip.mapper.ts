@@ -1,19 +1,6 @@
-import type {
-  AgentMessageRole,
-  AgentMessageType,
-  Booking,
-  BookingItem,
-  FlightOptionCache,
-  HotelOptionCache,
-  Trip,
-  TripPackage,
-  TripRequest,
-  TripRequestStatus
-} from '@prisma/client';
-import type { AgentMessageView, BookingSummaryView, PackageScore, PackageView, TripCardView, TripDetailView } from '@/types/travel';
+import type { BookingSummaryView, PackageView, TripCardView } from '@/types/travel';
 
-export function mapTripCard(trip: Trip & { bookings: Booking[] }): TripCardView {
-  const latestBooking = trip.bookings[0] ?? null;
+export function mapTripCard(trip: any): TripCardView {
   return {
     id: trip.id,
     title: trip.title,
@@ -23,22 +10,12 @@ export function mapTripCard(trip: Trip & { bookings: Booking[] }): TripCardView 
     returnDate: trip.returnDate.toISOString(),
     travelerCount: trip.travelerCount,
     status: trip.status,
-    bookingStatus: latestBooking?.status ?? null,
-    totalPriceCents: latestBooking?.totalPriceCents ?? null
+    bookingStatus: trip.bookings?.[0]?.status ?? null,
+    totalPriceCents: trip.bookings?.[0]?.totalPriceCents ?? null
   };
 }
 
-export function mapPackage(pkg: TripPackage & { flightOption: FlightOptionCache; hotelOption: HotelOptionCache }): PackageView {
-  const score: PackageScore = {
-    overall: pkg.overallScore,
-    priceFit: pkg.priceFitScore,
-    convenience: pkg.convenienceScore,
-    travelDuration: pkg.travelDurationScore,
-    hotelQuality: pkg.hotelQualityScore,
-    refundFlexibility: pkg.refundFlexibilityScore,
-    preferenceMatch: pkg.preferenceMatchScore
-  };
-
+export function mapPackage(pkg: any): PackageView {
   return {
     id: pkg.id,
     label: pkg.label,
@@ -48,58 +25,62 @@ export function mapPackage(pkg: TripPackage & { flightOption: FlightOptionCache;
     warnings: pkg.warnings,
     totalPriceCents: pkg.totalPriceCents,
     currency: pkg.currency,
-    score,
+    score: {
+      overall: pkg.overallScore,
+      priceFit: pkg.priceFitScore,
+      convenience: pkg.convenienceScore,
+      travelDuration: pkg.travelDurationScore,
+      hotelQuality: pkg.hotelQualityScore,
+      refundFlexibility: pkg.refundFlexibilityScore,
+      preferenceMatch: pkg.preferenceMatchScore
+    },
     flight: {
       airline: pkg.flightOption.airline,
-      airlineCode: pkg.flightOption.airlineCode,
       flightNumber: pkg.flightOption.flightNumber,
-      originCode: pkg.flightOption.originCode,
-      destinationCode: pkg.flightOption.destinationCode,
+      airlineCode: pkg.flightOption.airlineCode,
       departureTime: pkg.flightOption.departureTime.toISOString(),
       arrivalTime: pkg.flightOption.arrivalTime.toISOString(),
       durationMinutes: pkg.flightOption.durationMinutes,
       stops: pkg.flightOption.stops,
-      stopDetails: pkg.flightOption.stopDetails,
       refundable: pkg.flightOption.refundable,
-      cabinClass: pkg.flightOption.cabinClass,
-      loyaltyProgram: pkg.flightOption.loyaltyProgram,
+      originCode: pkg.flightOption.originCode,
+      destinationCode: pkg.flightOption.destinationCode,
       returnFlightNumber: pkg.flightOption.returnFlightNumber,
       returnDepartureTime: pkg.flightOption.returnDepartureTime?.toISOString() ?? null,
       returnArrivalTime: pkg.flightOption.returnArrivalTime?.toISOString() ?? null,
-      returnDurationMinutes: pkg.flightOption.returnDurationMinutes,
-      returnStops: pkg.flightOption.returnStops
+      returnDurationMinutes: pkg.flightOption.returnDurationMinutes ?? null,
+      returnStops: pkg.flightOption.returnStops ?? null
     },
     hotel: {
       name: pkg.hotelOption.name,
       stars: pkg.hotelOption.stars,
-      neighborhood: pkg.hotelOption.neighborhood,
-      city: pkg.hotelOption.city,
       address: pkg.hotelOption.address,
+      city: pkg.hotelOption.city,
+      refundable: pkg.hotelOption.refundable,
       nights: pkg.hotelOption.nights,
+      totalPriceCents: pkg.hotelOption.totalPriceCents,
       rating: pkg.hotelOption.rating,
       reviewCount: pkg.hotelOption.reviewCount,
-      amenities: pkg.hotelOption.amenities,
-      refundable: pkg.hotelOption.refundable,
       cancellationDeadline: pkg.hotelOption.cancellationDeadline?.toISOString() ?? null,
-      roomType: pkg.hotelOption.roomType,
-      bedType: pkg.hotelOption.bedType,
-      distanceToCenterKm: pkg.hotelOption.distanceToCenterKm,
-      totalPriceCents: pkg.hotelOption.totalPriceCents,
-      pricePerNightCents: pkg.hotelOption.pricePerNightCents
+      distanceToCenterKm: pkg.hotelOption.distanceToCenterKm ?? null,
+      roomType: pkg.hotelOption.roomType ?? null
     }
   };
 }
 
-export function mapBookingSummary(booking: Booking & { items: BookingItem[] }): BookingSummaryView {
+export function mapBooking(booking: any): BookingSummaryView {
   return {
     id: booking.id,
-    confirmationNumber: booking.confirmationNumber,
     status: booking.status,
+    paymentStatus: booking.paymentStatus,
+    fulfillmentStatus: booking.fulfillmentStatus,
     totalPriceCents: booking.totalPriceCents,
     currency: booking.currency,
-    bookedAt: booking.bookedAt?.toISOString() ?? null,
+    confirmationNumber: booking.confirmationNumber,
     cancellationDeadline: booking.cancellationDeadline?.toISOString() ?? null,
-    items: booking.items.map((item) => ({
+    paymentIntentId: booking.paymentIntentId,
+    providerBookingState: booking.providerBookingState,
+    items: (booking.items ?? []).map((item: any) => ({
       id: item.id,
       type: item.type,
       status: item.status,
@@ -107,42 +88,5 @@ export function mapBookingSummary(booking: Booking & { items: BookingItem[] }): 
       amountCents: item.amountCents,
       providerReference: item.providerReference
     }))
-  };
-}
-
-export function mapTripDetail(input: {
-  trip: Trip;
-  request: TripRequest & {
-    flightOptions: FlightOptionCache[];
-    hotelOptions: HotelOptionCache[];
-    packages: (TripPackage & { flightOption: FlightOptionCache; hotelOption: HotelOptionCache; booking?: Booking | null })[];
-    agentMessages: { id: string; role: AgentMessageRole; type: AgentMessageType; content: string; createdAt: Date }[];
-  };
-  booking?: (Booking & { items: BookingItem[] }) | null;
-}): TripDetailView {
-  return {
-    id: input.trip.id,
-    title: input.trip.title,
-    originLabel: input.trip.originLabel,
-    destinationLabel: input.trip.destinationLabel,
-    departureDate: input.trip.departureDate.toISOString(),
-    returnDate: input.trip.returnDate.toISOString(),
-    travelerCount: input.trip.travelerCount,
-    status: input.trip.status as TripRequestStatus,
-    selectedPackageId: input.request.selectedPackageId,
-    requestId: input.request.id,
-    budgetCents: input.request.budgetCents,
-    currency: input.request.currency,
-    flightOptionsCount: input.request.flightOptions.length,
-    hotelOptionsCount: input.request.hotelOptions.length,
-    packages: input.request.packages.map(mapPackage),
-    agentMessages: input.request.agentMessages.map((message): AgentMessageView => ({
-      id: message.id,
-      role: message.role,
-      type: message.type,
-      content: message.content,
-      createdAt: message.createdAt.toISOString()
-    })),
-    booking: input.booking ? mapBookingSummary(input.booking) : null
   };
 }

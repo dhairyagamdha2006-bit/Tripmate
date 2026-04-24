@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    typedRoutes: false
+    serverActions: {
+      bodySizeLimit: '2mb'
+    },
+    serverComponentsExternalPackages: ['@prisma/client', 'prisma', 'stripe', 'bcryptjs']
   }
 };
 

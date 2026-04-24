@@ -1,41 +1,42 @@
+import { createTripSchema } from '@/lib/validations/trip';
 import { tripRepository } from '@/server/repositories/trip.repository';
+import { auditRepository } from '@/server/repositories/audit.repository';
 
 export const tripService = {
-  listTripsForUser(userId: string) {
-    return tripRepository.listTripsByUserId(userId);
-  },
+  async createTrip(userId: string, payload: unknown) {
+    const parsed = createTripSchema.parse(payload);
 
-  getTripForUser(userId: string, tripId: string) {
-    return tripRepository.getTripByIdForUser(userId, tripId);
-  },
-
-  async selectPackage(userId: string, tripId: string, packageId: string) {
-    const request = await tripRepository.getLatestRequestByTripId(userId, tripId);
-    if (!request) {
-      throw new Error('Trip request not found.');
-    }
-
-    const pkg = request.packages.find((item) => item.id === packageId);
-    if (!pkg) {
-      throw new Error('Package not found for this trip.');
-    }
-
-    await tripRepository.setSelectedPackage(request.id, packageId, 'PENDING_APPROVAL');
-    await tripRepository.updateTripStatus(tripId, 'PENDING_APPROVAL');
-    await tripRepository.createAgentMessage({
-      tripRequestId: request.id,
-      role: 'ASSISTANT',
-      type: 'STATUS',
-      content: 'Package selected. Review every detail before booking.'
+    const trip = await tripRepository.createTripWithRequest(userId, {
+      title: parsed.title,
+      originCode: parsed.originCode,
+      originCity: parsed.originCity,
+      destinationCode: parsed.destinationCode,
+      destinationCity: parsed.destinationCity,
+      departureDate: new Date(parsed.departureDate),
+      returnDate: new Date(parsed.returnDate),
+      travelerCount: parsed.travelerCount,
+      budgetCents: parsed.budgetCents,
+      currency: parsed.currency,
+      cabinClass: parsed.cabinClass,
+      preferDirectFlights: parsed.preferDirectFlights,
+      hotelStarLevel: parsed.hotelStarLevel,
+      neighborhoodPreference: parsed.neighborhoodPreference,
+      amenities: parsed.amenities,
+      refundableOnly: parsed.refundableOnly,
+      notes: parsed.notes
     });
-    await tripRepository.createAuditLog({
-      userId,
-      tripId,
+
+    await auditRepository.log({
       actorType: 'USER',
-      action: 'package.selected',
-      details: { packageId }
+      action: 'trip.created',
+      userId,
+      tripId: trip.id,
+      details: {
+        requestId: trip.requests[0]?.id,
+        destinationCode: parsed.destinationCode
+      }
     });
 
-    return pkg;
+    return trip;
   }
 };

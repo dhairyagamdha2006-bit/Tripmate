@@ -1,23 +1,22 @@
-import Link from 'next/link';
-import { SignupForm } from '@/components/forms/signup-form';
+import { redirect } from 'next/navigation';
+import { auth } from '@/auth';
+import { SignupForm } from '@/components/auth/signup-form';
+import { Logo } from '@/components/common/logo';
 
-export default function SignupPage() {
+export default async function SignupPage() {
+  const session = await auth();
+  if (session?.user) {
+    redirect('/trips');
+  }
+
   return (
-    <div className="flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="auth-card">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Get started</p>
-        <h1 className="font-serif text-4xl text-slate-900">Create your Tripmate account</h1>
-        <p className="mt-3 text-sm text-slate-500">Build trips, compare trusted options, and approve bookings only when you are ready.</p>
-        <div className="mt-8">
-          <SignupForm />
-        </div>
-        <p className="mt-6 text-sm text-slate-500">
-          Already have an account?{' '}
-          <Link href="/login" className="font-medium text-blue-700 hover:text-blue-800">
-            Sign in.
-          </Link>
-        </p>
+    <main className="flex min-h-screen flex-col px-6 py-8">
+      <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
+        <Logo />
       </div>
-    </div>
+      <div className="mx-auto flex flex-1 items-center justify-center">
+        <SignupForm googleEnabled={Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET)} />
+      </div>
+    </main>
   );
 }

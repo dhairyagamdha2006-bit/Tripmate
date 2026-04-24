@@ -1,57 +1,213 @@
+import { BookingStatus, FulfillmentStatus, PaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/prisma';
-import type { BookingStatus, Prisma } from '@prisma/client';
 
 export const bookingRepository = {
-  getBookingByTripId(userId: string, tripId: string) {
-    return prisma.booking.findFirst({
-      where: { userId, tripId },
-      include: { items: true, tripPackage: { include: { flightOption: true, hotelOption: true } } },
-      orderBy: { createdAt: 'desc' }
+  findById(id: string) {
+    return prisma.booking.findUnique({
+      where: { id },
+      include: {
+        user: true,
+        trip: {
+          include: { shares: true }
+        },
+        tripRequest: true,
+        tripPackage: {
+          include: {
+            flightOption: true,
+            hotelOption: true
+          }
+        },
+        paymentMethod: true,
+        items: true
+      }
     });
   },
 
-  updateBookingStatus(bookingId: string, status: BookingStatus) {
-  return prisma.booking.update({
-    where: { id: bookingId },
-     { status, updatedAt: new Date() }
-  });
-},
+  findByIdForUser(id: string, userId: string) {
+    return prisma.booking.findFirst({
+      where: { id, userId },
+      include: {
+        user: true,
+        trip: {
+          include: { shares: true }
+        },
+        tripRequest: true,
+        tripPackage: {
+          include: {
+            flightOption: true,
+            hotelOption: true
+          }
+        },
+        paymentMethod: true,
+        items: true
+      }
+    });
+  },
 
+  findByPaymentIntentId(paymentIntentId: string) {
+    return prisma.booking.findUnique({
+      where: { paymentIntentId },
+      include: {
+        user: true,
+        trip: {
+          include: { shares: true }
+        },
+        tripRequest: true,
+        tripPackage: {
+          include: {
+            flightOption: true,
+            hotelOption: true
+          }
+        },
+        paymentMethod: true,
+        items: true
+      }
+    });
+  },
 
-  getBookingByRequestId(tripRequestId: string) {
+  findByTripRequestId(tripRequestId: string) {
     return prisma.booking.findUnique({
       where: { tripRequestId },
-      include: { items: true, tripPackage: { include: { flightOption: true, hotelOption: true } } }
+      include: {
+        items: true,
+        tripPackage: {
+          include: {
+            flightOption: true,
+            hotelOption: true
+          }
+        },
+        trip: {
+          include: { shares: true }
+        },
+        user: true,
+        tripRequest: true,
+        paymentMethod: true
+      }
     });
   },
 
-  createPendingBooking(data: Prisma.BookingUncheckedCreateInput) {
-    return prisma.booking.create({ data });
-  },
-
-  confirmBooking(args: {
-    bookingId: string;
-    status: BookingStatus;
-    confirmationNumber?: string | null;
+  async upsertFromPackage(input: {
+    userId: string;
+    tripId: string;
+    tripRequestId: string;
+    tripPackageId: string;
+    totalPriceCents: number;
+    currency: string;
     cancellationDeadline?: Date | null;
-    items: Prisma.BookingItemUncheckedCreateInput[];
+    flightDisplayName: string;
+    flightAmountCents: number;
+    flightProvider: string;
+    flightProviderRef?: string | null;
+    hotelDisplayName: string;
+    hotelAmountCents: number;
+    hotelProvider: string;
+    hotelProviderRef?: string | null;
   }) {
+    const itemCreateData = [
+      {
+        type: 'FLIGHT' as const,
+        status: 'QUOTED' as const,
+        provider: input.flightProvider,
+        providerReference: input.flightProviderRef ?? undefined,
+        displayName: input.flightDisplayName,
+        amountCents: input.flightAmountCents,
+        currency: input.currency,
+        cancellationDeadline: input.cancellationDeadline ?? undefined
+      },
+      {
+        type: 'HOTEL' as const,
+        status: 'QUOTED' as const,
+        provider: input.hotelProvider,
+        providerReference: input.hotelProviderRef ?? undefined,
+        displayName: input.hotelDisplayName,
+        amountCents: input.hotelAmountCents,
+        currency: input.currency,
+        cancellationDeadline: input.cancellationDeadline ?? undefined
+      }
+    ];
+
     return prisma.$transaction(async (tx) => {
-      await tx.bookingItem.deleteMany({ where: { bookingId: args.bookingId } });
-      if (args.items.length) {
-        await tx.bookingItem.createMany({ data: args.items });
+      const existing = await tx.booking.findUnique({ where: { tripRequestId: input.tripRequestId } });
+
+      if (existing) {
+        await tx.bookingItem.deleteMany({ where: { bookingId: existing.id } });
+        return tx.booking.update({
+          where: { id: existing.id },
+          data: {
+            tripPackageId: input.tripPackageId,
+            totalPriceCents: input.totalPriceCents,
+            currency: input.currency,
+            cancellationDeadline: input.cancellationDeadline ?? undefined,
+            status: BookingStatus.SELECTED,
+            paymentStatus: PaymentStatus.NOT_STARTED,
+            fulfillmentStatus: FulfillmentStatus.NOT_STARTED,
+            paymentIntentId: null,
+            paymentMethodId: null,
+            stripeCustomerId: null,
+            bookedAt: null,
+            providerBookingReference: null,
+            providerBookingState: null,
+            providerMetadata: null,
+            items: {
+              create: itemCreateData
+            }
+          },
+          include: { items: true }
+        });
       }
 
-      return tx.booking.update({
-        where: { id: args.bookingId },
+      return tx.booking.create({
         data: {
-          status: args.status,
-          confirmationNumber: args.confirmationNumber,
-          cancellationDeadline: args.cancellationDeadline,
-          bookedAt: args.status === 'CONFIRMED' ? new Date() : undefined
+          userId: input.userId,
+          tripId: input.tripId,
+          tripRequestId: input.tripRequestId,
+          tripPackageId: input.tripPackageId,
+          totalPriceCents: input.totalPriceCents,
+          currency: input.currency,
+          cancellationDeadline: input.cancellationDeadline ?? undefined,
+          status: BookingStatus.SELECTED,
+          paymentStatus: PaymentStatus.NOT_STARTED,
+          fulfillmentStatus: FulfillmentStatus.NOT_STARTED,
+          items: {
+            create: itemCreateData
+          }
         },
         include: { items: true }
       });
+    });
+  },
+
+  attachPaymentIntent(bookingId: string, input: {
+    paymentIntentId: string;
+    paymentMethodId: string;
+    stripeCustomerId: string;
+    paymentStatus: PaymentStatus;
+    status: BookingStatus;
+  }) {
+    return prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        paymentIntentId: input.paymentIntentId,
+        paymentMethodId: input.paymentMethodId,
+        stripeCustomerId: input.stripeCustomerId,
+        paymentStatus: input.paymentStatus,
+        status: input.status
+      }
+    });
+  },
+
+  updateStatus(bookingId: string, data: Prisma.BookingUpdateInput) {
+    return prisma.booking.update({
+      where: { id: bookingId },
+      data
+    });
+  },
+
+  listByUser(userId: string) {
+    return prisma.booking.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: { trip: true, items: true }
     });
   }
 };

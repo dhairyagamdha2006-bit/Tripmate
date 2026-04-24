@@ -1,6 +1,6 @@
 {
   "name": "tripmate-app",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -19,15 +19,24 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^0.0.56",
+    "@ai-sdk/openai": "^3.0.41",
+    "@auth/prisma-adapter": "^2.11.1",
     "@hookform/resolvers": "^3.9.1",
-    "@prisma/client": "^5.20.0",
+    "@prisma/client": "^5.22.0",
+    "@stripe/react-stripe-js": "^2.4.0",
+    "@stripe/stripe-js": "^4.8.0",
+    "ai": "^6.0.0",
+    "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.453.0",
-    "next": "^14.2.15",
+    "next": "^16.2.4",
+    "next-auth": "beta",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.53.0",
+    "stripe": "^22.0.0",
     "tailwind-merge": "^2.5.2",
     "zod": "^3.23.8"
   },
@@ -37,9 +46,9 @@
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
-    "eslint-config-next": "^14.2.15",
+    "eslint-config-next": "^16.2.4",
     "postcss": "^8.4.47",
-    "prisma": "^5.20.0",
+    "prisma": "^5.22.0",
     "tailwindcss": "^3.4.13",
     "tsx": "^4.19.1",
     "typescript": "^5.6.3"

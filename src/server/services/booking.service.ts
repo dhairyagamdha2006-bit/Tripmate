@@ -1,213 +1,256 @@
+import { BookingStatus, FulfillmentStatus, PaymentStatus, TripRequestStatus } from '@prisma/client';
+import { getBaseUrl } from '@/lib/utils/env';
+import { afterPaymentSchema, createPaymentIntentSchema } from '@/lib/validations/payment';
 import { bookingRepository } from '@/server/repositories/booking.repository';
+import { paymentMethodRepository } from '@/server/repositories/payment-method.repository';
 import { tripRepository } from '@/server/repositories/trip.repository';
-import { userRepository } from '@/server/repositories/user.repository';
-import {
-  createBookingProvider,
-  createPaymentProvider,
-  createNotificationProvider
-} from '@/server/integrations/provider-factory';
+import { auditRepository } from '@/server/repositories/audit.repository';
+import { stripeProvider } from '@/server/integrations/stripe-provider';
+import { emailService } from '@/server/services/email.service';
+import { reminderService } from '@/server/services/reminder.service';
+import { renderBookingEmail } from '@/server/services/email-templates';
+
+function paymentStateFromIntent(status: string): { paymentStatus: PaymentStatus; bookingStatus: BookingStatus } {
+  switch (status) {
+    case 'requires_payment_method':
+      return { paymentStatus: PaymentStatus.REQUIRES_PAYMENT_METHOD, bookingStatus: BookingStatus.PAYMENT_PENDING };
+    case 'requires_action':
+      return { paymentStatus: PaymentStatus.REQUIRES_ACTION, bookingStatus: BookingStatus.PAYMENT_REQUIRES_ACTION };
+    case 'processing':
+      return { paymentStatus: PaymentStatus.PROCESSING, bookingStatus: BookingStatus.PAYMENT_PENDING };
+    case 'succeeded':
+      return { paymentStatus: PaymentStatus.CAPTURED, bookingStatus: BookingStatus.BOOKING_REQUESTED };
+    case 'requires_capture':
+      return { paymentStatus: PaymentStatus.AUTHORIZED, bookingStatus: BookingStatus.PAYMENT_AUTHORIZED };
+    case 'canceled':
+      return { paymentStatus: PaymentStatus.CANCELED, bookingStatus: BookingStatus.CANCELLED };
+    default:
+      return { paymentStatus: PaymentStatus.FAILED, bookingStatus: BookingStatus.FAILED };
+  }
+}
+
+async function sendBookingStatusEmail(booking: any, statusLine: string) {
+  const activeShare = booking.trip.shares?.find((share: any) => share.status === 'ACTIVE');
+  const shareUrl = activeShare ? `${getBaseUrl()}/share/${activeShare.token}` : undefined;
+  const template = renderBookingEmail({
+    travelerName: booking.user.firstName ?? booking.user.name ?? 'traveler',
+    tripTitle: booking.trip.title,
+    destination: booking.trip.destinationLabel,
+    departureDate: booking.trip.departureDate,
+    returnDate: booking.trip.returnDate,
+    totalPriceCents: booking.totalPriceCents,
+    currency: booking.currency,
+    statusLine,
+    shareUrl,
+    cancellationDeadline: booking.cancellationDeadline
+  });
+
+  if (booking.user.email) {
+    await emailService.safeSendUserEmail({
+      kind: 'BOOKING_CONFIRMATION',
+      userId: booking.userId,
+      bookingId: booking.id,
+      tripId: booking.tripId,
+      toEmail: booking.user.email,
+      subject: template.subject,
+      html: template.html,
+      text: template.text
+    });
+  }
+}
 
 export const bookingService = {
-  async approveBooking(userId: string, tripId: string, paymentMethodId?: string) {
-    const bookingProvider = createBookingProvider();
-    const paymentProvider = createPaymentProvider();
-    const notificationProvider = createNotificationProvider();
-
-    const trip = await tripRepository.getTripByIdForUser(userId, tripId);
-    if (!trip) throw new Error('Trip not found.');
+  async selectPackage(userId: string, tripId: string, packageId: string) {
+    const trip = await tripRepository.getTripForUser(tripId, userId);
+    if (!trip) {
+      throw new Error('TRIP_NOT_FOUND');
+    }
 
     const request = trip.requests[0];
-    if (!request) throw new Error('Trip request not found.');
-    if (!request.selectedPackageId) throw new Error('Select a package before booking.');
-
-    const existing = await bookingRepository.getBookingByRequestId(request.id);
-    if (existing?.status === 'CONFIRMED') return existing;
-
-    const pkg = request.packages.find((p) => p.id === request.selectedPackageId);
-    if (!pkg) throw new Error('Selected package could not be found.');
-
-    const profile = await userRepository.findById(userId);
-
-    // Use provided payment method OR fetch the default one
-    const paymentMethod = paymentMethodId
-      ? await userRepository.getDefaultPaymentMethod(userId)
-      : await userRepository.getDefaultPaymentMethod(userId);
-
-    if (!paymentMethod) {
-      throw new Error('No payment method found. Please add a payment method.');
+    const selectedPackage = request?.packages.find((pkg) => pkg.id === packageId);
+    if (!request || !selectedPackage) {
+      throw new Error('PACKAGE_NOT_FOUND');
     }
 
-    const booking = existing ?? await bookingRepository.createPendingBooking({
+    await tripRepository.setSelectedPackage(request.id, packageId);
+    await tripRepository.setTripStatus(tripId, TripRequestStatus.PACKAGE_SELECTED);
+
+    const booking = await bookingRepository.upsertFromPackage({
       userId,
       tripId,
       tripRequestId: request.id,
-      tripPackageId: pkg.id,
-      paymentMethodId: paymentMethod.id,
-      status: 'PENDING_PROVIDER_CONFIRMATION',
-      totalPriceCents: pkg.totalPriceCents,
-      currency: pkg.currency
+      tripPackageId: selectedPackage.id,
+      totalPriceCents: selectedPackage.totalPriceCents,
+      currency: selectedPackage.currency,
+      cancellationDeadline: selectedPackage.hotelOption.cancellationDeadline,
+      flightDisplayName: `${selectedPackage.flightOption.airline} ${selectedPackage.flightOption.flightNumber}`,
+      flightAmountCents: selectedPackage.flightOption.priceCents,
+      flightProvider: selectedPackage.flightOption.provider,
+      flightProviderRef: selectedPackage.flightOption.providerOfferId,
+      hotelDisplayName: selectedPackage.hotelOption.name,
+      hotelAmountCents: selectedPackage.hotelOption.totalPriceCents,
+      hotelProvider: selectedPackage.hotelOption.provider,
+      hotelProviderRef: selectedPackage.hotelOption.providerOfferId
     });
 
-    await tripRepository.updateRequestStatus(request.id, 'BOOKING_PENDING');
-    await tripRepository.updateTripStatus(trip.id, 'BOOKING_PENDING');
-
-    // ── 1. Authorize payment ──────────────────────────────────────
-    const payment = await paymentProvider.authorize({
-      userId,
-      amountCents: pkg.totalPriceCents,
-      currency: pkg.currency,
-      paymentMethodId: paymentMethod.id,
-      description: `Tripmate booking for ${trip.title}`
-    });
-
-    if (!payment.success) {
-      await bookingRepository.confirmBooking({ bookingId: booking.id, status: 'FAILED', items: [] });
-      await tripRepository.updateRequestStatus(request.id, 'FAILED');
-      await tripRepository.updateTripStatus(trip.id, 'FAILED');
-      throw new Error(payment.failureReason ?? 'Payment authorization failed.');
-    }
-
-    // ── 2. Create booking with provider ──────────────────────────
-    const providerResult = await bookingProvider.createBooking({
-      tripId: trip.id,
-      tripRequestId: request.id,
-      packageId: pkg.id,
-      travelerName: profile ? `${profile.firstName} ${profile.lastName}` : 'Tripmate Traveler',
-      travelerEmail: profile?.email ?? 'traveler@example.com'
-    });
-
-    if (!providerResult.success) {
-      await bookingRepository.confirmBooking({ bookingId: booking.id, status: 'FAILED', items: [] });
-      await tripRepository.updateRequestStatus(request.id, 'FAILED');
-      await tripRepository.updateTripStatus(trip.id, 'FAILED');
-      throw new Error(providerResult.failureReason ?? 'Booking provider failed.');
-    }
-
-    const flightAmount = pkg.flightOption.priceCents * request.travelerCount;
-    const hotelAmount = pkg.hotelOption.totalPriceCents;
-
-    const confirmed = await bookingRepository.confirmBooking({
-      bookingId: booking.id,
-      status: 'CONFIRMED',
-      confirmationNumber: providerResult.confirmationNumber,
-      cancellationDeadline: providerResult.cancellationDeadline
-        ? new Date(providerResult.cancellationDeadline)
-        : undefined,
-      items: providerResult.items.map((item) => ({
-        bookingId: booking.id,
-        type: item.type,
-        status: item.status,
-        provider: item.provider,
-        providerReference: item.providerReference,
-        displayName: item.displayName,
-        amountCents: item.type === 'FLIGHT' ? flightAmount : hotelAmount,
-        currency: pkg.currency,
-        details: item.details ?? {}
-      }))
-    });
-
-    await tripRepository.updateRequestStatus(request.id, 'CONFIRMED');
-    await tripRepository.updateTripStatus(trip.id, 'CONFIRMED');
-
-    await tripRepository.createAuditLog({
-      userId,
-      tripId,
+    await auditRepository.log({
       actorType: 'USER',
-      action: 'booking.confirmed',
-      details: {
-        bookingId: confirmed.id,
-        confirmationNumber: confirmed.confirmationNumber,
-        totalPriceCents: pkg.totalPriceCents,
-        paymentReference: payment.providerReference
+      action: 'booking.package.selected',
+      userId,
+      tripId,
+      bookingId: booking.id,
+      details: { packageId }
+    });
+
+    return bookingRepository.findByIdForUser(booking.id, userId);
+  },
+
+  async createPaymentIntent(userId: string, bookingId: string, payload: unknown) {
+    const parsed = createPaymentIntentSchema.parse(payload);
+    const booking = await bookingRepository.findByIdForUser(bookingId, userId);
+    if (!booking) {
+      throw new Error('BOOKING_NOT_FOUND');
+    }
+
+    const paymentMethod = await paymentMethodRepository.findByIdForUser(parsed.paymentMethodId, userId);
+    if (!paymentMethod?.providerCustomerId || !paymentMethod.providerPaymentMethodId) {
+      throw new Error('PAYMENT_METHOD_NOT_FOUND');
+    }
+
+    const paymentIntent = await stripeProvider.createPaymentIntent({
+      amount: booking.totalPriceCents,
+      currency: booking.currency,
+      customerId: paymentMethod.providerCustomerId,
+      paymentMethodId: paymentMethod.providerPaymentMethodId,
+      description: `Tripmate booking for ${booking.trip.title}`,
+      metadata: {
+        bookingId: booking.id,
+        tripId: booking.tripId,
+        userId: booking.userId,
+        tripRequestId: booking.tripRequestId
       }
     });
 
-    // ── 3. Send confirmation email ────────────────────────────────
-    if (profile) {
-      await notificationProvider.send({
-        toEmail: profile.email,
-        toName: `${profile.firstName} ${profile.lastName}`,
-        subject: `Your trip to ${trip.destinationLabel} is confirmed! 🎉`,
-        templateData: {
-          message: `Hi ${profile.firstName}, your booking is confirmed. Here are your details:`,
-          details: {
-            'Booking Reference': confirmed.confirmationNumber ?? 'Pending',
-            'Trip': trip.title,
-            'Destination': trip.destinationLabel,
-            'Departure': trip.departureDate.toLocaleDateString('en-US', { dateStyle: 'long' }),
-            'Return': trip.returnDate.toLocaleDateString('en-US', { dateStyle: 'long' }),
-            'Total Paid': `$${(pkg.totalPriceCents / 100).toFixed(2)} ${pkg.currency}`
-          },
-          ctaUrl: `${process.env.APP_URL}/trips/${tripId}/success`,
-          ctaLabel: 'View your itinerary'
-        }
-      }).catch((err) => {
-        // Email failure must never fail the booking — log and continue
-        console.error('[booking] Failed to send confirmation email:', err);
-      });
+    const state = paymentStateFromIntent(paymentIntent.status);
+    await bookingRepository.attachPaymentIntent(booking.id, {
+      paymentIntentId: paymentIntent.id,
+      paymentMethodId: paymentMethod.id,
+      stripeCustomerId: paymentMethod.providerCustomerId,
+      paymentStatus: state.paymentStatus,
+      status: state.bookingStatus
+    });
+
+    if (paymentIntent.status === 'succeeded' || paymentIntent.status === 'requires_capture') {
+      await this.handleSuccessfulPaymentIntent(paymentIntent.id);
     }
 
-    return confirmed;
+    return {
+      paymentIntentId: paymentIntent.id,
+      clientSecret: paymentIntent.client_secret,
+      status: paymentIntent.status
+    };
   },
 
-  // ── Cancellation ────────────────────────────────────────────────
-  async cancelBooking(userId: string, tripId: string) {
-    const notificationProvider = createNotificationProvider();
-
-    const trip = await tripRepository.getTripByIdForUser(userId, tripId);
-    if (!trip) throw new Error('Trip not found.');
-
-    const booking = trip.bookings[0];
-    if (!booking) throw new Error('No booking found for this trip.');
-
-    if (booking.status === 'CANCELLED') {
-      throw new Error('This booking is already cancelled.');
-    }
-    if (booking.status !== 'CONFIRMED') {
-      throw new Error('Only confirmed bookings can be cancelled.');
+  async syncAfterPayment(userId: string, bookingId: string, payload: unknown) {
+    const parsed = afterPaymentSchema.parse(payload);
+    const booking = await bookingRepository.findByIdForUser(bookingId, userId);
+    if (!booking || booking.paymentIntentId !== parsed.paymentIntentId) {
+      throw new Error('BOOKING_NOT_FOUND');
     }
 
-    // Check cancellation deadline
-    if (booking.cancellationDeadline && new Date() > booking.cancellationDeadline) {
-      throw new Error(
-        `The cancellation deadline was ${booking.cancellationDeadline.toLocaleDateString()}. This booking can no longer be cancelled.`
+    const paymentIntent = await stripeProvider.retrievePaymentIntent(parsed.paymentIntentId);
+    const state = paymentStateFromIntent(paymentIntent.status);
+    await bookingRepository.updateStatus(bookingId, {
+      paymentStatus: state.paymentStatus,
+      status: state.bookingStatus
+    });
+
+    if (paymentIntent.status === 'succeeded' || paymentIntent.status === 'requires_capture') {
+      await this.handleSuccessfulPaymentIntent(paymentIntent.id);
+    }
+
+    return bookingRepository.findByIdForUser(bookingId, userId);
+  },
+
+  async handleSuccessfulPaymentIntent(paymentIntentId: string) {
+    const booking = await bookingRepository.findByPaymentIntentId(paymentIntentId);
+    if (!booking) {
+      return null;
+    }
+
+    if (booking.fulfillmentStatus === FulfillmentStatus.PENDING_MANUAL || booking.fulfillmentStatus === FulfillmentStatus.CONFIRMED) {
+      return booking;
+    }
+
+    const paymentIntent = await stripeProvider.retrievePaymentIntent(paymentIntentId);
+    const state = paymentStateFromIntent(paymentIntent.status);
+
+    const updated = await bookingRepository.updateStatus(booking.id, {
+      paymentStatus: state.paymentStatus,
+      status: state.bookingStatus,
+      bookedAt: new Date()
+    });
+
+    const finalized = await bookingRepository.updateStatus(booking.id, {
+      fulfillmentStatus: FulfillmentStatus.PENDING_MANUAL,
+      status: BookingStatus.PENDING_MANUAL_FULFILLMENT,
+      providerBookingState: 'pending-manual-fulfillment',
+      providerMetadata: {
+        reason: 'Tripmate collected payment and assembled a real quote, but provider-side ticketing or package issuance for the selected bundle still needs manual fulfillment or provider approval.',
+        paymentIntentId
+      },
+      items: {
+        updateMany: {
+          where: {},
+          data: {
+            status: 'PENDING_MANUAL_FULFILLMENT'
+          }
+        }
+      }
+    });
+
+    await tripRepository.setRequestStatus(booking.tripRequestId, TripRequestStatus.BOOKING_PENDING);
+    await tripRepository.setTripStatus(booking.tripId, TripRequestStatus.BOOKING_PENDING);
+
+    const hydrated = await bookingRepository.findById(booking.id);
+    if (hydrated) {
+      await reminderService.scheduleForBooking(hydrated);
+      await sendBookingStatusEmail(
+        hydrated,
+        'Your payment was received and your booking request has been submitted. Final provider fulfillment is still pending manual confirmation, so Tripmate will keep the status honest in your itinerary.'
       );
     }
 
-    await bookingRepository.updateBookingStatus(booking.id, 'CANCELLED');
-    await tripRepository.updateTripStatus(tripId, 'CANCELLED');
-    await tripRepository.updateRequestStatus(trip.requests[0]!.id, 'CANCELLED');
-
-    await tripRepository.createAuditLog({
-      userId,
-      tripId,
-      actorType: 'USER',
-      action: 'booking.cancelled',
-      details: { bookingId: booking.id }
+    await auditRepository.log({
+      actorType: 'WEBHOOK',
+      action: 'booking.payment.succeeded',
+      userId: booking.userId,
+      tripId: booking.tripId,
+      bookingId: booking.id,
+      details: {
+        paymentIntentId,
+        bookingStatus: finalized.status,
+        paymentStatus: updated.paymentStatus
+      }
     });
 
-    // Send cancellation email
-    const profile = await userRepository.findById(userId);
-    if (profile) {
-      await notificationProvider.send({
-        toEmail: profile.email,
-        toName: `${profile.firstName} ${profile.lastName}`,
-        subject: `Booking cancelled — ${trip.title}`,
-        templateData: {
-          message: `Hi ${profile.firstName}, your booking has been cancelled.`,
-          details: {
-            'Booking Reference': booking.confirmationNumber ?? 'N/A',
-            'Trip': trip.title,
-            'Status': 'Cancelled'
-          },
-          ctaUrl: `${process.env.APP_URL}/trips`,
-          ctaLabel: 'View my trips'
-        }
-      }).catch((err) => {
-        console.error('[booking] Failed to send cancellation email:', err);
-      });
+    return hydrated;
+  },
+
+  async handlePaymentFailed(paymentIntentId: string, reason?: string) {
+    const booking = await bookingRepository.findByPaymentIntentId(paymentIntentId);
+    if (!booking) {
+      return null;
     }
 
-    return { cancelled: true };
+    await bookingRepository.updateStatus(booking.id, {
+      status: BookingStatus.FAILED,
+      paymentStatus: PaymentStatus.FAILED,
+      providerBookingState: reason ?? 'payment-failed'
+    });
+    await tripRepository.setRequestStatus(booking.tripRequestId, TripRequestStatus.FAILED, reason ?? 'Payment failed.');
+    await tripRepository.setTripStatus(booking.tripId, TripRequestStatus.FAILED);
+
+    return bookingRepository.findById(booking.id);
   }
 };

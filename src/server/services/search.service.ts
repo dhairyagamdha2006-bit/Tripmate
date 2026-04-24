@@ -1,205 +1,183 @@
-import { Prisma } from '@prisma/client';
+import { AgentMessageRole, AgentMessageType, TripRequestStatus } from '@prisma/client';
 import { createFlightProvider, createHotelProvider } from '@/server/integrations/provider-factory';
+import { tripRepository } from '@/server/repositories/trip.repository';
+import { recommendationService } from '@/server/services/recommendation.service';
+import { aiService } from '@/server/services/ai.service';
+import { auditRepository } from '@/server/repositories/audit.repository';
+import { agentMessageRepository } from '@/server/repositories/agent-message.repository';
 
 const flightProvider = createFlightProvider();
 const hotelProvider = createHotelProvider();
 
-import { recommendationService } from '@/server/services/recommendation.service';
-import { searchSessionRepository } from '@/server/repositories/search-session.repository';
-import { tripRepository } from '@/server/repositories/trip.repository';
-
-const flightProvider = new MockFlightProvider();
-const hotelProvider = new MockHotelProvider();
-
 export const searchService = {
   async runSearch(userId: string, tripId: string) {
-    const request = await tripRepository.getLatestRequestByTripId(userId, tripId);
+    const request = await tripRepository.getLatestRequest(tripId, userId);
     if (!request) {
-      throw new Error('Trip request not found.');
+      throw new Error('TRIP_NOT_FOUND');
     }
 
-    await tripRepository.updateTripStatus(tripId, 'SEARCHING');
-    await tripRepository.updateRequestStatus(request.id, 'SEARCHING');
-    await tripRepository.createAgentMessage({
-      tripRequestId: request.id,
-      role: 'ASSISTANT',
-      type: 'STATUS',
-      content: 'Searching flights and hotels now.'
-    });
+    if (request.bookings.length) {
+      throw new Error('This trip already has a selected booking. Duplicate the trip if you need to re-run search without overwriting booked state.');
+    }
 
-    const flightSession = await searchSessionRepository.create({
+    await tripRepository.setSearching(tripId, request.id);
+    await tripRepository.clearSearchArtifacts(request.id);
+
+    const flightSession = await tripRepository.createSearchSession({
       tripRequestId: request.id,
       kind: 'FLIGHTS',
       provider: flightProvider.name,
       requestPayload: {
         originCode: request.originCode,
         destinationCode: request.destinationCode,
-        departureDate: request.departureDate.toISOString(),
-        returnDate: request.returnDate.toISOString()
+        departureDate: request.departureDate.toISOString().slice(0, 10),
+        returnDate: request.returnDate.toISOString().slice(0, 10)
       }
     });
 
-    const hotelSession = await searchSessionRepository.create({
+    const hotelSession = await tripRepository.createSearchSession({
       tripRequestId: request.id,
       kind: 'HOTELS',
       provider: hotelProvider.name,
       requestPayload: {
         destinationCity: request.destinationCity,
-        departureDate: request.departureDate.toISOString(),
-        returnDate: request.returnDate.toISOString()
-      }
-    });
-
-    const [flightOffers, hotelOffers] = await Promise.all([
-      flightProvider.searchFlights({
-        originCode: request.originCode,
         destinationCode: request.destinationCode,
-        departureDate: request.departureDate.toISOString(),
-        returnDate: request.returnDate.toISOString(),
-        travelerCount: request.travelerCount,
-        cabinClass: request.cabinClass,
-        preferDirectFlights: request.preferDirectFlights,
-        refundableOnly: request.refundableOnly,
-        currency: request.currency
-      }),
-      hotelProvider.searchHotels({
-        destinationCity: request.destinationCity,
-        destinationCode: request.destinationCode,
-        checkInDate: request.departureDate.toISOString(),
-        checkOutDate: request.returnDate.toISOString(),
-        travelerCount: request.travelerCount,
-        minStars: request.hotelStarLevel,
-        neighborhoodPreference: request.neighborhoodPreference,
-        amenities: request.amenities,
-        refundableOnly: request.refundableOnly,
-        currency: request.currency
-      })
-    ]);
-
-    await searchSessionRepository.updateStatus(
-  flightSession.id,
-  'COMPLETED',
-  flightOffers as unknown as Prisma.InputJsonValue
-);
-
-await searchSessionRepository.updateStatus(
-  hotelSession.id,
-  'COMPLETED',
-  hotelOffers as unknown as Prisma.InputJsonValue
-);
-
-    const flightOptionRows = flightOffers.map((offer) => ({
-      tripRequestId: request.id,
-      providerSearchSessionId: flightSession.id,
-      provider: offer.provider,
-      providerOfferId: offer.providerOfferId,
-      airline: offer.airline,
-      airlineCode: offer.airlineCode,
-      flightNumber: offer.flightNumber,
-      originCode: offer.originCode,
-      destinationCode: offer.destinationCode,
-      departureTime: new Date(offer.departureTime),
-      arrivalTime: new Date(offer.arrivalTime),
-      durationMinutes: offer.durationMinutes,
-      stops: offer.stops,
-      stopDetails: offer.stopDetails,
-      cabinClass: offer.cabinClass,
-      priceCents: offer.priceCents,
-      currency: offer.currency,
-      refundable: offer.refundable,
-      changeable: offer.changeable,
-      baggageIncluded: offer.baggageIncluded,
-      seatsAvailable: offer.seatsAvailable,
-      loyaltyProgram: offer.loyaltyProgram,
-      returnFlightNumber: offer.returnFlightNumber,
-      returnDepartureTime: offer.returnDepartureTime ? new Date(offer.returnDepartureTime) : undefined,
-      returnArrivalTime: offer.returnArrivalTime ? new Date(offer.returnArrivalTime) : undefined,
-      returnDurationMinutes: offer.returnDurationMinutes,
-      returnStops: offer.returnStops,
-      expiresAt: offer.expiresAt ? new Date(offer.expiresAt) : undefined
-    }));
-
-    const hotelOptionRows = hotelOffers.map((offer) => ({
-      tripRequestId: request.id,
-      providerSearchSessionId: hotelSession.id,
-      provider: offer.provider,
-      providerHotelId: offer.providerHotelId,
-      providerOfferId: offer.providerOfferId,
-      name: offer.name,
-      chain: offer.chain,
-      stars: offer.stars,
-      neighborhood: offer.neighborhood,
-      city: offer.city,
-      countryCode: offer.countryCode,
-      address: offer.address,
-      latitude: offer.latitude,
-      longitude: offer.longitude,
-      pricePerNightCents: offer.pricePerNightCents,
-      totalPriceCents: offer.totalPriceCents,
-      nights: offer.nights,
-      currency: offer.currency,
-      rating: offer.rating,
-      reviewCount: offer.reviewCount,
-      amenities: offer.amenities,
-      refundable: offer.refundable,
-      cancellationDeadline: offer.cancellationDeadline ? new Date(offer.cancellationDeadline) : undefined,
-      roomType: offer.roomType,
-      bedType: offer.bedType,
-      distanceToCenterKm: offer.distanceToCenterKm,
-      expiresAt: offer.expiresAt ? new Date(offer.expiresAt) : undefined
-    }));
-
-    const idBase = request.id.slice(-6);
-    const flightRowsWithIds = flightOptionRows.map((row, index) => ({ ...row, id: `f${idBase}${index}`.slice(0, 25) }));
-    const hotelRowsWithIds = hotelOptionRows.map((row, index) => ({ ...row, id: `h${idBase}${index}`.slice(0, 25) }));
-
-    const packageRows = recommendationService.buildPackages({
-      request,
-      snapshot: request.preferenceSnapshot,
-      flights: flightRowsWithIds,
-      hotels: hotelRowsWithIds
-    }).map((pkg, index) => ({
-      ...pkg,
-      id: `p${idBase}${index}`.slice(0, 25)
-    }));
-
-    await tripRepository.replaceSearchResults({
-      requestId: request.id,
-      tripId,
-      flightOptions: flightRowsWithIds,
-      hotelOptions: hotelRowsWithIds,
-      tripPackages: packageRows,
-      status: 'RECOMMENDATIONS_READY'
-    });
-
-    await tripRepository.createAgentMessages([
-      {
-        tripRequestId: request.id,
-        role: 'ASSISTANT',
-        type: 'STATUS',
-        content: `${flightOffers.length} flight options and ${hotelOffers.length} hotel options were found.`
-      },
-      {
-        tripRequestId: request.id,
-        role: 'ASSISTANT',
-        type: 'SUMMARY',
-        content: `I built ${packageRows.length} bundled recommendations and ranked them by price fit, convenience, flexibility, and hotel quality.`
-      }
-    ]);
-
-    await tripRepository.createAuditLog({
-      userId,
-      tripId,
-      actorType: 'SYSTEM',
-      action: 'trip.search_completed',
-      details: {
-        requestId: request.id,
-        flightCount: flightOffers.length,
-        hotelCount: hotelOffers.length,
-        packageCount: packageRows.length
+        checkInDate: request.departureDate.toISOString().slice(0, 10),
+        checkOutDate: request.returnDate.toISOString().slice(0, 10)
       }
     });
 
-    return tripRepository.getLatestRequestByTripId(userId, tripId);
+    try {
+      const [flightOffers, hotelOffers] = await Promise.all([
+        flightProvider.search({
+          originCode: request.originCode,
+          destinationCode: request.destinationCode,
+          departureDate: request.departureDate.toISOString().slice(0, 10),
+          returnDate: request.returnDate.toISOString().slice(0, 10),
+          travelerCount: request.travelerCount,
+          cabinClass: request.cabinClass,
+          preferDirectFlights: request.preferDirectFlights,
+          refundableOnly: request.refundableOnly,
+          currency: request.currency
+        }),
+        hotelProvider.search({
+          destinationCity: request.destinationCity,
+          destinationCode: request.destinationCode,
+          checkInDate: request.departureDate.toISOString().slice(0, 10),
+          checkOutDate: request.returnDate.toISOString().slice(0, 10),
+          travelerCount: request.travelerCount,
+          minStars: request.hotelStarLevel,
+          neighborhoodPreference: request.neighborhoodPreference,
+          amenities: request.amenities,
+          refundableOnly: request.refundableOnly,
+          currency: request.currency
+        })
+      ]);
+
+      await tripRepository.completeSearchSession(flightSession.id, {
+        status: 'COMPLETED',
+        responsePayload: { count: flightOffers.length }
+      });
+      await tripRepository.completeSearchSession(hotelSession.id, {
+        status: 'COMPLETED',
+        responsePayload: { count: hotelOffers.length }
+      });
+
+      const stored = await tripRepository.storeSearchResults({
+        tripRequestId: request.id,
+        flightSessionId: flightSession.id,
+        hotelSessionId: hotelSession.id,
+        flights: flightOffers,
+        hotels: hotelOffers
+      });
+
+      if (!stored.flights.length || !stored.hotels.length) {
+        const summary = !stored.flights.length
+          ? 'No flight offers were returned for that search. Try adjusting airport codes, dates, or cabin class.'
+          : 'No hotel offers were returned for that search. Try using a city IATA code or broadening hotel preferences.';
+        await tripRepository.setRequestStatus(request.id, TripRequestStatus.FAILED, summary);
+        await tripRepository.setTripStatus(tripId, TripRequestStatus.FAILED);
+        await agentMessageRepository.create({
+          tripRequestId: request.id,
+          role: AgentMessageRole.SYSTEM,
+          type: AgentMessageType.ERROR,
+          content: summary
+        });
+        return {
+          flights: stored.flights.length,
+          hotels: stored.hotels.length,
+          packages: 0,
+          summary
+        };
+      }
+
+      const packages = recommendationService.buildPackages({
+        request,
+        flights: stored.flights,
+        hotels: stored.hotels
+      });
+
+      const summary = await aiService.generateRecommendationSummary({
+        trip: {
+          title: request.trip.title,
+          origin: request.originCity,
+          destination: request.destinationCity,
+          departureDate: request.departureDate.toISOString().slice(0, 10),
+          returnDate: request.returnDate.toISOString().slice(0, 10),
+          budgetCents: request.budgetCents,
+          currency: request.currency,
+          travelerCount: request.travelerCount,
+          notes: request.notes
+        },
+        packages: packages.map((pkg) => ({
+          ...pkg,
+          flightOption: stored.flights.find((flight) => flight.id === pkg.flightOptionCacheId),
+          hotelOption: stored.hotels.find((hotel) => hotel.id === pkg.hotelOptionCacheId)
+        }))
+      });
+
+      await tripRepository.savePackages(request.id, packages, summary);
+      await tripRepository.setTripStatus(tripId, TripRequestStatus.RECOMMENDATIONS_READY);
+      await agentMessageRepository.create({
+        tripRequestId: request.id,
+        role: AgentMessageRole.SYSTEM,
+        type: AgentMessageType.SUMMARY,
+        content: summary
+      });
+      await auditRepository.log({
+        actorType: 'USER',
+        action: 'trip.search.completed',
+        userId,
+        tripId,
+        details: {
+          flightOffers: stored.flights.length,
+          hotelOffers: stored.hotels.length,
+          packages: packages.length,
+          providers: {
+            flight: flightProvider.name,
+            hotel: hotelProvider.name
+          }
+        }
+      });
+
+      return {
+        flights: stored.flights.length,
+        hotels: stored.hotels.length,
+        packages: packages.length,
+        summary
+      };
+    } catch (error) {
+      await tripRepository.completeSearchSession(flightSession.id, {
+        status: 'FAILED',
+        responsePayload: { error: error instanceof Error ? error.message : 'Unknown error' }
+      });
+      await tripRepository.completeSearchSession(hotelSession.id, {
+        status: 'FAILED',
+        responsePayload: { error: error instanceof Error ? error.message : 'Unknown error' }
+      });
+      await tripRepository.setRequestStatus(request.id, TripRequestStatus.FAILED, error instanceof Error ? error.message : 'Search failed.');
+      await tripRepository.setTripStatus(tripId, TripRequestStatus.FAILED);
+      throw error;
+    }
   }
 };

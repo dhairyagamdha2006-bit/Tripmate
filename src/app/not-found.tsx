@@ -1,15 +1,15 @@
-import { EmptyState } from '@/components/common/empty-state';
-import { LinkButton } from '@/components/ui/link-button';
-import { ResponsiveShell } from '@/components/common/responsive-shell';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export default function NotFound() {
   return (
-    <ResponsiveShell className="py-20">
-      <EmptyState
-        title="Page not found"
-        description="The page you requested is missing or may have moved."
-        action={<LinkButton href="/">Go home</LinkButton>}
-      />
-    </ResponsiveShell>
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center px-6 text-center">
+      <h1 className="text-5xl font-semibold text-white">Page not found</h1>
+      <p className="mt-4 max-w-xl text-slate-300">The itinerary or page you requested is no longer available, may have been revoked, or may never have existed.</p>
+      <div className="mt-8 flex gap-3">
+        <Link href="/"><Button>Go home</Button></Link>
+        <Link href="/trips"><Button variant="outline">Open trips</Button></Link>
+      </div>
+    </main>
   );
 }

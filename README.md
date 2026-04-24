@@ -1,231 +1,246 @@
 # Tripmate
 
-Tripmate is a light-themed, trust-first AI travel planning starter built with Next.js App Router, TypeScript, Tailwind, Prisma, PostgreSQL, React Hook Form, and Zod.
+Tripmate is a Vercel-first travel planning and checkout app built with Next.js App Router, TypeScript, Prisma, PostgreSQL, Auth.js, Stripe, Amadeus, SendGrid, and the Vercel AI SDK.
 
-It includes:
-- signup and login with a simple session model
-- traveler profile management
-- trip request creation with validation
-- mock flight and hotel providers
-- deterministic recommendation scoring
-- package selection and booking approval flow
-- trip dashboard, detail pages, comparison, booking review, and success pages
-- repository and service layers that keep domain logic out of page components
+This codebase upgrades the original demo into a production-oriented deployment target with:
 
-## Stack
+- Auth.js database sessions, credentials auth, bcrypt password hashing, and Google OAuth
+- Real Amadeus-backed flight search and Amadeus-backed hotel offer search
+- Stripe setup intents, saved payment methods, payment intents, and webhooks
+- AI recommendation summaries and trip chat backed by OpenAI or Anthropic through the Vercel AI SDK
+- SendGrid-powered transactional email delivery with delivery tracking
+- Vercel Cron cancellation reminders with idempotent reminder jobs
+- Public share links for itineraries with revocation and scoped data exposure
+- Honest booking state transitions that separate quote selection, payment, and provider fulfillment
 
-- Next.js 14 App Router
-- React 18
-- TypeScript
-- Tailwind CSS 3
-- Prisma ORM
-- PostgreSQL
-- React Hook Form
-- Zod
+## Product truthfulness
 
-## Project structure
+Tripmate intentionally separates:
 
-```text
-tripmate-app/
-  prisma/
-    schema.prisma
-    seed.ts
-  src/
-    app/
-      (marketing)/
-      (auth)/
-      (app)/
-      api/
-    components/
-      ui/
-      common/
-      forms/
-      trip/
-      booking/
-      dashboard/
-      layout/
-    lib/
-      auth/
-      db/
-      validations/
-      scoring/
-      formatters/
-      utils/
-    server/
-      repositories/
-      services/
-      integrations/
-      mappers/
-      http/
-    types/
-```
+- provider-backed search results
+- package selection
+- payment collection
+- booking request / fulfillment state
+
+That matters because provider capabilities differ by account tier and workflow. This app never fabricates provider confirmation numbers or pretends ticketing happened when it did not.
+
+## Architecture
+
+- `auth.ts`: Auth.js v5-style setup
+- `src/app/api`: Route handlers for auth, trips, chat, checkout, sharing, Stripe webhooks, and cron
+- `src/server/integrations`: Provider integrations for Amadeus, Stripe, and SendGrid
+- `src/server/services`: Domain services for trips, search, booking, profile, sharing, reminders, email, and AI
+- `src/server/repositories`: Prisma-facing persistence layer
+- `src/components`: UI for auth, trip planning, checkout, sharing, and profile/payment management
+- `prisma/schema.prisma`: Full data model including Auth.js models, reminder jobs, share links, and email deliveries
+
+## Requirements
+
+- Node.js 20+
+- PostgreSQL 14+
+- A Stripe account
+- An Amadeus Self-Service account
+- A SendGrid account for transactional email
+- Either an OpenAI or Anthropic API key
 
 ## Environment variables
 
-Copy the example file first:
+Copy `.env.example` to `.env` and fill in the values:
 
 ```bash
 cp .env.example .env
 ```
 
-Then set at least:
+Minimum variables for the core app:
 
-```env
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/tripmate"
-SESSION_COOKIE_NAME="tripmate_session"
-SESSION_COOKIE_SECURE="false"
-APP_URL="http://localhost:3000"
-```
+- `DATABASE_URL`
+- `AUTH_SECRET`
+- `AUTH_URL`
+- `STRIPE_SECRET_KEY`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `AMADEUS_CLIENT_ID`
+- `AMADEUS_CLIENT_SECRET`
+- `SENDGRID_API_KEY`
+- `SENDGRID_FROM_EMAIL`
+- `CRON_SECRET`
+- `NEXT_PUBLIC_APP_URL`
+- one of `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`
 
-## Local setup
+## Local development
 
-1. Install dependencies.
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Generate Prisma client and run the first migration.
+Create and migrate the database:
+
+```bash
+npm run db:migrate
+```
+
+Generate Prisma client if needed:
 
 ```bash
 npm run db:generate
-npm run db:migrate -- --name init
 ```
 
-3. Seed demo data.
-
-```bash
-npm run db:seed
-```
-
-4. Start the development server.
+Start the app:
 
 ```bash
 npm run dev
 ```
 
-5. Open the app in your browser.
+Open:
 
 ```text
 http://localhost:3000
 ```
 
-## Demo login
+## Stripe webhook testing
 
-After seeding, you can sign in with:
-
-- Email: `demo@tripmate.app`
-- Password: `Tripmate123!`
-
-## Page-by-page smoke test
-
-Use this checklist after running the app.
-
-### 1. Landing page
-- Visit `/`
-- Confirm the light theme, hero section, and CTA buttons render correctly
-
-### 2. Login page
-- Visit `/login`
-- Sign in with the seeded demo account
-- Confirm you land on `/trips`
-
-### 3. Signup page
-- Visit `/signup`
-- Create a new test account
-- Confirm you land on `/profile`
-
-### 4. Traveler profile
-- Save the profile form
-- Confirm validation appears for missing or invalid fields
-- Confirm success feedback appears after save
-
-### 5. New trip page
-- Visit `/trips/new`
-- Submit a valid trip request
-- Confirm redirect to `/trips/{id}/planning`
-
-### 6. Planning page
-- Confirm search starts automatically
-- Confirm planning progress card updates
-- Confirm “View recommendations” becomes available
-
-### 7. Recommendations page
-- Confirm 3 to 4 bundles appear
-- Confirm pricing, hotel details, and explanation text are visible
-- Select a package
-
-### 8. Booking review page
-- Confirm selected flight, hotel, refundability, and pricing are shown
-- Click “Confirm and book”
-
-### 9. Booking success page
-- Confirm confirmation cards render
-- Confirm navigation back to dashboard and trip details works
-
-### 10. Trip detail page
-- Confirm selected package and booking summary appear
-- Confirm planning messages are visible
-
-## GitHub upload steps
-
-If you want to create a brand-new GitHub repository from this project:
-
-1. Unzip or copy the project folder to your local machine.
-2. Open a terminal in the project folder.
-3. Run:
+Use Stripe CLI locally:
 
 ```bash
-git init
-git add .
-git commit -m "Initial Tripmate app"
+stripe listen --forward-to localhost:3000/api/stripe/webhook
 ```
 
-4. Create a new empty repository on GitHub.
-5. Connect your local folder to GitHub:
+Copy the printed webhook secret into `STRIPE_WEBHOOK_SECRET`.
+
+## Optional local seed data
+
+The seed script is opt-in and does not create mock search results. It can create a sample login if you enable it:
 
 ```bash
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/tripmate-app.git
-git push -u origin main
+SEED_SAMPLE_DATA=true npm run db:seed
 ```
 
-## Deploying
+Defaults:
 
-You can deploy this to any host that supports Next.js and PostgreSQL.
+- email: `demo@tripmate.local`
+- password: `Tripmate123!`
 
-### Before deploying
-- create a production PostgreSQL database
-- set `DATABASE_URL`
-- set `SESSION_COOKIE_SECURE=true`
-- set `APP_URL` to the production URL
-- run migrations against production
+Override with:
 
-### Example production commands
+```bash
+SEED_SAMPLE_EMAIL=you@example.com SEED_SAMPLE_PASSWORD='StrongPassword123!' npm run db:seed
+```
+
+## Vercel deployment
+
+1. Create a PostgreSQL database.
+2. Add every variable from `.env.example` to Vercel.
+3. Set `NEXT_PUBLIC_APP_URL` and `AUTH_URL` to your production URL.
+4. Deploy the project.
+5. Run Prisma migrations against the production database.
+
+Local CLI deploy:
+
+```bash
+vercel
+vercel env pull .env.local
+npm run db:migrate:deploy
+vercel --prod
+```
+
+The project includes `vercel.json` with an hourly cron hitting `/api/cron/reminders`.
+
+## Database migration strategy
+
+### Fresh database
+
+Recommended for the cleanest deployment:
 
 ```bash
 npm install
-npm run db:generate
-npm run db:migrate:deploy
+cp .env.example .env
+npm run db:migrate
 npm run build
 ```
 
-Then run migrations in your deployment pipeline or release step.
+### Existing database from the older demo
 
-## Notes about this starter
+The old demo schema used different booking enums and the pre-Auth.js session system. This codebase preserves legacy password compatibility in application code, but the schema evolution is large enough that you should:
 
-- Flight, hotel, booking, payment, and notification integrations are mocked intentionally.
-- Real provider adapters have placeholder files ready for Amadeus, Duffel, Hotelbeds, Stripe, and SendGrid.
-- Payment handling is intentionally token-placeholder based. Never store raw card numbers.
-- Auth is intentionally lightweight. Harden it before a real launch.
+1. back up the database
+2. test the migration against a staging copy first
+3. prefer a new database for production if the old environment has little or no critical user data
 
-## What remains before real production launch
+If you must migrate an existing database in place:
 
-- stronger auth and session hardening
-- CSRF and rate limiting
-- production-safe payment method capture via Stripe or equivalent
-- real provider credentials and provider retry logic
-- observability, monitoring, and alerting
-- background jobs for long-running searches and booking retries
-- end-to-end tests and CI checks
-- email delivery and transactional notification templates
+```bash
+# after backing up your DB
+npm install
+npm run db:generate
+npx prisma migrate deploy
+```
+
+If Prisma reports drift from the old schema, use a staged migration or move to a new database and re-import only users/trips you need.
+
+## Manual test checklist
+
+### Auth
+
+- Create an account with email and password
+- Sign in with credentials
+- Sign in with Google
+- Confirm old scrypt-hashed passwords can still log in and get rehashed to bcrypt
+
+### Profile and payments
+
+- Save a traveler profile
+- Add a Stripe card through the setup intent flow
+- Remove a saved card
+
+### Search and itinerary planning
+
+- Create a new trip
+- Run live search
+- Verify flight/hotel offers are provider-backed
+- Select a package
+- Verify recommendation summary appears
+- Ask itinerary questions in Tripmate AI
+
+### Checkout and webhooks
+
+- Pay with a saved card
+- Confirm `payment_intent.succeeded` reaches `/api/stripe/webhook`
+- Confirm booking state becomes `PENDING_MANUAL_FULFILLMENT` or another truthful state based on the webhook result
+
+### Sharing and email
+
+- Create a share link
+- Open `/share/{token}` in an incognito browser
+- Confirm private account and payment details are not exposed
+- Revoke a share link
+- Email a share link
+- Confirm booking confirmation and reminder emails create `EmailDelivery` records
+
+### Reminders
+
+- Set a booking cancellation deadline in the future
+- Confirm reminder jobs are created
+- Trigger the cron route manually with the cron bearer token
+- Confirm each reminder sends once and does not duplicate
+
+## Commands
+
+```bash
+npm install
+npm run db:migrate
+npm run db:generate
+npm run dev
+npm run build
+npm run lint
+npm run db:migrate:deploy
+```
+
+## Notes on provider behavior
+
+- The app uses real Amadeus search APIs for flights and hotel offers.
+- Payment is real Stripe payment collection.
+- Final travel fulfillment is kept honest. Payment success does not automatically claim that a provider issued tickets or hotel reservations unless your provider-side workflow truly confirms that.
+- Share links intentionally expose itinerary essentials only.
+

@@ -1,20 +1,13 @@
-import { PageHeader } from '@/components/common/page-header';
-import { ResponsiveShell } from '@/components/common/responsive-shell';
-import { TripRequestForm } from '@/components/forms/trip-request-form';
-import { StepProgress } from '@/components/trip/step-progress';
+import { TripCreateForm } from '@/components/trip/trip-create-form';
 
 export default function NewTripPage() {
   return (
-    <ResponsiveShell className="py-10">
-      <PageHeader
-        eyebrow="New trip"
-        title="Plan a new trip"
-        description="Enter the essentials once. Tripmate will search, bundle, and explain the best options before you approve anything."
-      />
-      <div className="mb-8">
-        <StepProgress steps={['Trip details', 'Planning', 'Recommendations', 'Book']} current={0} />
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-semibold text-white">Create a trip</h1>
+        <p className="mt-2 text-slate-300">Start with structured travel preferences so provider search and AI reasoning stay grounded.</p>
       </div>
-      <TripRequestForm />
-    </ResponsiveShell>
+      <TripCreateForm />
+    </div>
   );
 }
